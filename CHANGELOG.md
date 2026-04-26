@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Shell scripts: satisfy ShellCheck (SC1007, SC2154, SC2016); CI `actions/checkout@v6`.
+
 ### Added
 
 - (none yet)
@@ -23,5 +27,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `agents/*.yaml` metadata for multiple runtimes.
 - GitHub Actions workflow for validation and smoke tests.
 
-[Unreleased]: https://github.com/rongyi/problem-solution-recorder-oss/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/rongyi/problem-solution-recorder-oss/releases/tag/v0.1.0
+[Unreleased]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/releases/tag/v0.1.0

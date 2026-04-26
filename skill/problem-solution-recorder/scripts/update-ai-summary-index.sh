@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd -P)"
+SCRIPT_DIR="$( ( unset CDPATH; cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd -P ) )"
 RESOLVE="$SCRIPT_DIR/resolve-kb-root.sh"
 
 root="$("$RESOLVE" "${1:-}")"
@@ -71,7 +71,7 @@ section_text() {
       follow_up="$(section_text "$file" "后续事项")"
 
       printf '### %s - %s\n\n' "$date_value" "$title_value"
-      printf -- '- source: `%s`\n' "$rel"
+      printf -- "- source: \`%s\`\n" "$rel"
       printf -- '- status: %s\n' "$status_value"
       printf -- '- tools: %s\n' "$tools_value"
       printf -- '- tags: %s\n' "$tags_value"

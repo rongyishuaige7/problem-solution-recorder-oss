@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd -P)"
-SKILL_DIR="$(CDPATH= cd -- "$SCRIPT_DIR/.." >/dev/null 2>&1 && pwd -P)"
+SCRIPT_DIR="$( ( unset CDPATH; cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd -P ) )"
+SKILL_DIR="$( ( unset CDPATH; cd -P -- "$SCRIPT_DIR/.." >/dev/null 2>&1 && pwd -P ) )"
 SKILL_NAME="$(basename "$SKILL_DIR")"
 VALIDATE="$SCRIPT_DIR/validate-skill.sh"
 
@@ -79,7 +79,7 @@ target_dir_for() {
 }
 
 canonical_dir() {
-  CDPATH= cd -- "$1" >/dev/null 2>&1 && pwd -P
+  ( unset CDPATH; cd -P -- "$1" >/dev/null 2>&1 && pwd -P )
 }
 
 skill_canonical="$(canonical_dir "$SKILL_DIR")"
@@ -154,7 +154,9 @@ uninstall_one() {
         printf '[removed] symlink %s\n' "$target"
       fi
     else
-      printf '[skip] symlink does not point at this skill: %s -> %s\n' "$target" "$resolved"
+      local link_dest
+      link_dest="$(readlink "$target" 2>/dev/null || true)"
+      printf '[skip] symlink does not point at this skill: %s -> %s\n' "$target" "${link_dest:-?}"
     fi
     return 0
   fi
