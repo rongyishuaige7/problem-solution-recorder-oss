@@ -172,7 +172,7 @@ See [PUBLISHING.md](./PUBLISHING.md) for a full checklist.
 
 ## Screenshots
 
-_Add screenshots or a short screen recording under `docs/media/` after the first public release (optional)._
+_Add screenshots or a short screen recording under [`docs/media/`](docs/media/) after the first public release (optional)._
 
 ## GitHub topics (suggested)
 
