@@ -13,13 +13,22 @@ Checklist for shipping **Problem Solution Recorder** to GitHub, ClawdHub, and lo
 
 ## GitHub
 
-1. Create the repository (example):
+1. Create the repository (example — **confirm org/user and do not push secrets**):
 
    ```bash
-   gh repo create rongyi/problem-solution-recorder-oss --public --source=. --remote=origin --push
+   gh repo create rongyi/problem-solution-recorder-oss --public --source=. --remote=origin
+   git push -u origin main
+   git push origin v0.1.0
    ```
 
-   Do not push secrets. Confirm `.gitignore` covers local env files.
+   If you prefer a manual remote:
+
+   ```bash
+   git remote add origin git@github.com:rongyi/problem-solution-recorder-oss.git
+   git push -u origin main
+   ```
+
+   Confirm `.gitignore` covers local env files before the first push.
 
 2. Tag releases:
 
