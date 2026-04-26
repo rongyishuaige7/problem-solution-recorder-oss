@@ -16,7 +16,7 @@ Checklist for shipping **Problem Solution Recorder** to GitHub, ClawdHub, and lo
 1. Create the repository (example — **confirm org/user and do not push secrets**):
 
    ```bash
-   gh repo create rongyi/problem-solution-recorder-oss --public --source=. --remote=origin
+   gh repo create rongyishuaige7/problem-solution-recorder-oss --public --source=. --remote=origin
    git push -u origin main
    git push origin v0.1.0
    ```
@@ -24,7 +24,7 @@ Checklist for shipping **Problem Solution Recorder** to GitHub, ClawdHub, and lo
    If you prefer a manual remote:
 
    ```bash
-   git remote add origin git@github.com:rongyi/problem-solution-recorder-oss.git
+   git remote add origin git@github.com:rongyishuaige7/problem-solution-recorder-oss.git
    git push -u origin main
    ```
 
@@ -65,7 +65,7 @@ Checklist for shipping **Problem Solution Recorder** to GitHub, ClawdHub, and lo
 - [ ] Fresh clone smoke test:
 
   ```bash
-  git clone https://github.com/rongyi/problem-solution-recorder-oss.git
+  git clone https://github.com/rongyishuaige7/problem-solution-recorder-oss.git
   cd problem-solution-recorder-oss
   skill/problem-solution-recorder/scripts/smoke-test.sh
   ```

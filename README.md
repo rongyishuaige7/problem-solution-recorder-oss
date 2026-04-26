@@ -11,7 +11,7 @@ An agent skill for maintaining a configurable **problem–solution knowledge bas
 ## Quick start
 
 ```bash
-git clone https://github.com/rongyi/problem-solution-recorder-oss.git
+git clone https://github.com/rongyishuaige7/problem-solution-recorder-oss.git
 cd problem-solution-recorder-oss
 
 # 1) Create a knowledge base from the bundled template
@@ -56,7 +56,7 @@ The skill is a **workflow wrapper**: your live KB stays a normal git repo; the s
 ## What this repository contains
 
 ```text
-skill/problem-solution-recorder/     # publishable skill folder (ClawdHub / local install)
+skill/problem-solution-recorder/     # publishable skill folder (local install or registries)
 examples/minimal-knowledge-base/     # browsable mirror of the bundled template + sample data
 ```
 
@@ -146,25 +146,6 @@ The generated knowledge base includes:
 - `AI记录提示词.md` — copyable prompts
 - `AI工具记录规则.md` — global rule snippets and post-solve protocol
 
-## Publish to ClawdHub
-
-Install the **ClawHub** CLI (`clawhub`), authenticate, accept license terms on [clawhub.ai](https://clawhub.ai) if prompted, then publish **only** the skill folder.
-
-Each publish must bump the `version` field in `skill/problem-solution-recorder/SKILL.md` (duplicate versions are rejected). Bundle size is capped (registry limit, typically on the order of tens of MB).
-
-```bash
-clawhub publish ./skill/problem-solution-recorder \
-  --slug problem-solution-recorder \
-  --name "Problem Solution Recorder" \
-  --version 0.1.0 \
-  --tags "knowledge-base,debugging,markdown,agents" \
-  --changelog "Initial public release"
-```
-
-If the CLI reports missing license acceptance, retry after accepting terms in the browser, or use any documented `--accept-license` / equivalent flag shipped by your `clawhub` version.
-
-See [PUBLISHING.md](./PUBLISHING.md) for a full checklist.
-
 ## GitHub layout
 
 - Publish the **whole repository** to GitHub for docs, CI, and examples.
@@ -184,7 +165,7 @@ Agents should redact API keys, tokens, cookies, passwords, private keys, authori
 
 ## Contributing
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md).
+See [CONTRIBUTING.md](./CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md). Maintainer release and registry notes: [PUBLISHING.md](./PUBLISHING.md).
 
 ## License
 
