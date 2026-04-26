@@ -1,0 +1,4 @@
+interface:
+  display_name: "Problem Solution Recorder"
+  short_description: "Archive solved issues for reuse"
+  default_prompt: "Use the problem-solution-recorder skill to archive this solved issue in my configured problem-solution knowledge base."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Problem Solution Recorder"
+  short_description: "Maintain a Markdown problem-solution knowledge base (records, indexes, patterns, reviews)."
+  default_prompt: "Use $problem-solution-recorder to archive this solved issue in my configured problem-solution knowledge base."
