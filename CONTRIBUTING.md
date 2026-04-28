@@ -15,6 +15,12 @@ skill/problem-solution-recorder/scripts/validate-skill.sh
 skill/problem-solution-recorder/scripts/smoke-test.sh
 ```
 
+When changing knowledge-base scanning behavior, also run:
+
+```bash
+skill/problem-solution-recorder/scripts/check-kb.sh examples/minimal-knowledge-base
+```
+
 If `shellcheck` is installed:
 
 ```bash
@@ -44,7 +50,7 @@ Then re-apply any intentional overrides under `examples/minimal-knowledge-base/R
 
 - Prefer small, focused PRs.
 - Describe motivation, user-visible changes, and any platform-specific notes (Codex / Claude / Cursor / OpenClaw).
-- Ensure `validate-skill.sh` and `smoke-test.sh` pass.
+- Ensure `validate-skill.sh`, `smoke-test.sh`, and relevant `check-kb.sh` scans pass.
 
 ## Security
 

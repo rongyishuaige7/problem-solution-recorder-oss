@@ -8,6 +8,10 @@ root="$("$RESOLVE" "${1:-}")"
 records_dir="$root/records"
 target="$root/AI_SUMMARY_INDEX.md"
 tmp="${target}.tmp"
+generated_tmp="${target}.generated.tmp"
+
+begin_marker='<!-- PSR:BEGIN GENERATED -->'
+end_marker='<!-- PSR:END GENERATED -->'
 
 front_value() {
   local file="$1"
@@ -43,8 +47,10 @@ section_text() {
 }
 
 {
+  printf '%s\n' "$begin_marker"
+  printf '\n'
   printf '# AI Summary Index\n\n'
-  printf 'Use this file as the first stop for AI recall. It is generated from records and can be edited by hand when more precision is needed.\n\n'
+  printf 'Use this generated section as the first stop for AI recall.\n\n'
   printf '## Entries\n\n'
 
   if [[ -d "$records_dir" ]]; then
@@ -83,7 +89,40 @@ section_text() {
       printf -- '- follow_up: %s\n\n' "${follow_up:-"-"}"
     done < <(find "$records_dir" -type f -name '*.md' | sort)
   fi
-} > "$tmp"
+  printf '%s\n' "$end_marker"
+} > "$generated_tmp"
+
+if [[ -f "$target" ]] && grep -Fq "$begin_marker" "$target" && grep -Fq "$end_marker" "$target"; then
+  awk -v begin="$begin_marker" -v end="$end_marker" -v generated="$generated_tmp" '
+    $0 == begin {
+      while ((getline line < generated) > 0) {
+        print line
+      }
+      close(generated)
+      in_generated = 1
+      next
+    }
+    in_generated && $0 == end {
+      in_generated = 0
+      next
+    }
+    !in_generated {
+      print
+    }
+  ' "$target" > "$tmp"
+else
+  {
+    cat "$generated_tmp"
+    printf '\n## Manual Notes\n\n'
+    if [[ -f "$target" ]]; then
+      printf 'Previous content preserved during migration to generated markers. Edit this section freely; it is preserved when the generated index is refreshed.\n\n'
+      cat "$target"
+    else
+      printf 'Add hand-written notes here. This section is preserved when the generated index is refreshed.\n'
+    fi
+  } > "$tmp"
+fi
 
 mv "$tmp" "$target"
+rm -f "$generated_tmp"
 printf 'Updated %s\n' "$target"

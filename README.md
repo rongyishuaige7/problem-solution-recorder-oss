@@ -128,6 +128,7 @@ Flags:
 ```bash
 skill/problem-solution-recorder/scripts/validate-skill.sh
 skill/problem-solution-recorder/scripts/smoke-test.sh
+skill/problem-solution-recorder/scripts/check-kb.sh "$PROBLEM_SOLUTION_KB_ROOT"
 skill/problem-solution-recorder/scripts/doctor-local.sh
 ```
 
@@ -138,6 +139,7 @@ skill/problem-solution-recorder/scripts/print-prompt.sh global-rule
 skill/problem-solution-recorder/scripts/print-prompt.sh hook
 skill/problem-solution-recorder/scripts/new-record.sh "Issue title"
 skill/problem-solution-recorder/scripts/update-ai-summary-index.sh
+skill/problem-solution-recorder/scripts/check-kb.sh "$PROBLEM_SOLUTION_KB_ROOT"
 ```
 
 The generated knowledge base includes:
@@ -162,6 +164,8 @@ _Add screenshots or a short screen recording under [`docs/media/`](docs/media/) 
 ## Safety
 
 Agents should redact API keys, tokens, cookies, passwords, private keys, authorization codes, and bearer tokens. Use `[REDACTED]` for secret values.
+
+`check-kb.sh` scans your Markdown knowledge base for likely leaked secrets before sharing, committing, or regenerating indexes.
 
 ## Contributing
 

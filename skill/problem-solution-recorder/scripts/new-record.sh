@@ -112,6 +112,14 @@ csv_to_yaml_array() {
   printf ']'
 }
 
+escape_md_cell() {
+  local value="$1"
+  value="$(printf '%s' "$value" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g; s/^[[:space:]]+//; s/[[:space:]]+$//')"
+  value="${value//\\/\\\\}"
+  value="${value//|/\\|}"
+  printf '%s' "$value"
+}
+
 yaml_tools="$(csv_to_yaml_array "$tools_value")"
 yaml_tags="$(csv_to_yaml_array "$tags_value")"
 safe_title="${title//\\/\\\\}"
@@ -170,7 +178,10 @@ tags: $yaml_tags
 EOF
 
 if [[ -f "$root/INDEX.md" ]] && ! grep -Fq "$record_rel" "$root/INDEX.md"; then
-  printf '| %s | %s | draft | %s | %s | [%s](%s) |\n' "$date_value" "$title" "${tools_value:-"-"}" "${tags_value:-"-"}" "$record_rel" "$record_rel" >> "$root/INDEX.md"
+  index_title="$(escape_md_cell "$title")"
+  index_tools="$(escape_md_cell "${tools_value:-"-"}")"
+  index_tags="$(escape_md_cell "${tags_value:-"-"}")"
+  printf '| %s | %s | draft | %s | %s | [%s](%s) |\n' "$date_value" "$index_title" "$index_tools" "$index_tags" "$record_rel" "$record_rel" >> "$root/INDEX.md"
 fi
 
 if [[ -x "$SCRIPT_DIR/update-ai-summary-index.sh" ]]; then

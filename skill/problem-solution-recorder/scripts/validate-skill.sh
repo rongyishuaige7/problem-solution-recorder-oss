@@ -48,7 +48,7 @@ for agent in openai.yaml claude.yaml cursor.yaml openclaw.yaml; do
 done
 [[ -d "$SKILL_DIR/assets/minimal-knowledge-base" ]] || fail "missing assets/minimal-knowledge-base"
 
-for script in resolve-kb-root.sh init-kb.sh doctor-local.sh validate-skill.sh install.sh print-prompt.sh new-record.sh update-ai-summary-index.sh smoke-test.sh; do
+for script in resolve-kb-root.sh init-kb.sh doctor-local.sh validate-skill.sh install.sh print-prompt.sh new-record.sh update-ai-summary-index.sh check-kb.sh smoke-test.sh; do
   [[ -x "$SKILL_DIR/scripts/$script" ]] || fail "missing executable scripts/$script"
 done
 

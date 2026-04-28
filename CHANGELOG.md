@@ -10,10 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Shell scripts: satisfy ShellCheck (SC1007, SC2154, SC2016); CI `actions/checkout@v6`.
+- Preserve manual notes in `AI_SUMMARY_INDEX.md` while refreshing generated entries.
+- Escape Markdown table cells when adding new records to `INDEX.md`.
 
 ### Added
 
-- (none yet)
+- `check-kb.sh` scans Markdown knowledge bases for likely leaked secrets.
+- CI now scans the example knowledge base for likely leaked secrets.
 
 ## [0.1.0] - 2026-04-26
 

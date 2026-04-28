@@ -3,6 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$( ( unset CDPATH; cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd -P ) )"
 RESOLVE="$SCRIPT_DIR/resolve-kb-root.sh"
+CHECK_KB="$SCRIPT_DIR/check-kb.sh"
 
 root="$("$RESOLVE" "${1:-}")"
 
@@ -45,6 +46,13 @@ if [[ -x "$root/bin/qs" ]]; then
   "$root/bin/qs" check >/dev/null || failures=$((failures + 1))
 else
   printf '[info] bin/qs not found or not executable; Markdown-only mode is still supported\n'
+fi
+
+if [[ -x "$CHECK_KB" ]]; then
+  "$CHECK_KB" "$root" --quiet || failures=$((failures + 1))
+else
+  printf '[missing] scripts/check-kb.sh\n'
+  failures=$((failures + 1))
 fi
 
 if [[ "$failures" -gt 0 ]]; then

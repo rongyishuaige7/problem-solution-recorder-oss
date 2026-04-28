@@ -20,6 +20,7 @@ skill/problem-solution-recorder/scripts/install.sh --symlink --codex --claude
 
 skill/problem-solution-recorder/scripts/validate-skill.sh
 skill/problem-solution-recorder/scripts/smoke-test.sh
+skill/problem-solution-recorder/scripts/check-kb.sh "$PROBLEM_SOLUTION_KB_ROOT"
 ```
 
 ## 工作原理
@@ -52,6 +53,8 @@ skill/problem-solution-recorder/scripts/install.sh --copy --all
 ## 安全
 
 禁止写入真实 API key、token、cookie、密码、私钥等；统一使用 `[REDACTED]`。
+
+`check-kb.sh` 会扫描 Markdown 知识库中的疑似密钥，建议在提交、分享或重新生成 AI 摘要索引前运行。
 
 ## 贡献与行为准则
 

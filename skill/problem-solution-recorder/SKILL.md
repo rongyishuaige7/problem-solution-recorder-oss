@@ -70,6 +70,7 @@ Use the bundled helper scripts when the repository does not provide a stronger n
 ./scripts/update-ai-summary-index.sh
 ./scripts/print-prompt.sh global-rule
 ./scripts/doctor-local.sh
+./scripts/check-kb.sh
 ```
 
 Use the repository CLI when available and more capable:
@@ -150,6 +151,12 @@ Before finalizing a write, run the repository checker if available:
 
 ```bash
 "$PROBLEM_SOLUTION_KB_ROOT/bin/qs" check
+```
+
+If no repository-native checker exists, run:
+
+```bash
+./scripts/check-kb.sh "$PROBLEM_SOLUTION_KB_ROOT"
 ```
 
 If write permission is unavailable, output the complete Markdown record and the exact index entries that should be added.

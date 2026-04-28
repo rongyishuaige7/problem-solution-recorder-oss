@@ -24,5 +24,8 @@ jobs:
       - name: Validate skill structure
         run: skill/problem-solution-recorder/scripts/validate-skill.sh
 
+      - name: Scan example knowledge base
+        run: skill/problem-solution-recorder/scripts/check-kb.sh examples/minimal-knowledge-base
+
       - name: Smoke test
         run: skill/problem-solution-recorder/scripts/smoke-test.sh

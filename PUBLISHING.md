@@ -6,6 +6,7 @@ Checklist for shipping **Problem Solution Recorder** to GitHub, ClawdHub, and lo
 
 - [ ] `skill/problem-solution-recorder/scripts/validate-skill.sh` passes.
 - [ ] `skill/problem-solution-recorder/scripts/smoke-test.sh` passes.
+- [ ] `skill/problem-solution-recorder/scripts/check-kb.sh examples/minimal-knowledge-base` passes.
 - [ ] `CHANGELOG.md` updated (Keep a Changelog).
 - [ ] `skill/problem-solution-recorder/SKILL.md` frontmatter `version:` bumped for a new registry publish.
 - [ ] `metadata.openclaw.homepage` in `SKILL.md` points at the canonical GitHub URL.
