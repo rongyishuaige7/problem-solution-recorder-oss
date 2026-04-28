@@ -1,11 +1,22 @@
 # Problem Solution Recorder（问题解决记录器）
 
+> 面向 AI 工具和独立开发者的 Markdown 问题解决记忆库。
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![Skill version](https://img.shields.io/badge/skill-0.1.0-blue)](./skill/problem-solution-recorder/SKILL.md)
 
-[English README](README.md)
+[![English README](https://img.shields.io/badge/docs-English-0f62fe)](README.md)
+中文说明
 
 面向 AI 编程助手的 **Agent Skill**：在 skill 之外维护一套可配置的 **问题–解决 Markdown 知识库**，用于归档已解决问题、保留排障证据、维护人类索引与 AI 摘要索引、检索历史案例、沉淀可复用排障模式，以及做周期性复盘。
+
+## 亮点
+
+- 用纯 Markdown 记录已解决问题。
+- 同时维护人类索引 `INDEX.md` 和 AI 索引 `AI_SUMMARY_INDEX.md`。
+- 支持通过环境变量、项目标记或 XDG 配置定位知识库根目录。
+- 提供记录、索引、校验、本地安装的一组辅助脚本。
+- 自带知识库密钥扫描，便于提交和发布前检查敏感内容。
 
 ## 快速开始
 

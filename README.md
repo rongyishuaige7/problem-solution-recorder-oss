@@ -1,12 +1,23 @@
 # Problem Solution Recorder
 
+> Markdown-native problem solving memory for AI tools and independent developers.
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![Skill version](https://img.shields.io/badge/skill-0.1.0-blue)](./skill/problem-solution-recorder/SKILL.md)
 ![Platforms](https://img.shields.io/static/v1?label=platforms&message=Codex%20%7C%20Claude%20%7C%20Cursor%20%7C%20Agents%20%7C%20OpenClaw&color=lightgrey)
 
-[中文说明](README.zh-CN.md)
+[![English README](https://img.shields.io/badge/docs-English-0f62fe)](README.md)
+[![中文说明](https://img.shields.io/badge/docs-中文-0f62fe)](README.zh-CN.md)
 
-An agent skill for maintaining a configurable **problem–solution knowledge base** in Markdown (outside the skill). It helps agents archive solved incidents, keep human and AI indexes, search past fixes, distill reusable patterns, and run periodic reviews.
+An agent skill for maintaining a configurable **problem–solution knowledge base** in Markdown outside the skill. It helps agents archive solved incidents, keep human and AI indexes, search past fixes, distill reusable patterns, and run periodic reviews.
+
+## Highlights
+
+- Records solved issues in plain Markdown.
+- Keeps a human `INDEX.md` and a compact `AI_SUMMARY_INDEX.md`.
+- Resolves the knowledge base root through env, project marker, or XDG config.
+- Ships helper scripts for recording, indexing, validation, and local installs.
+- Adds a secret scanner for knowledge base content before sharing or publishing.
 
 ## Quick start
 
