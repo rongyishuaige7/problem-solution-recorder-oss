@@ -19,7 +19,7 @@ Checklist for shipping **Problem Solution Recorder** to GitHub, ClawdHub, and lo
    ```bash
    gh repo create rongyishuaige7/problem-solution-recorder-oss --public --source=. --remote=origin
    git push -u origin main
-   git push origin v0.1.0
+   git push origin v0.2.0
    ```
 
    If you prefer a manual remote:
@@ -34,8 +34,8 @@ Checklist for shipping **Problem Solution Recorder** to GitHub, ClawdHub, and lo
 2. Tag releases:
 
    ```bash
-   git tag -a v0.1.0 -m "v0.1.0"
-   git push origin v0.1.0
+   git tag -a v0.2.0 -m "v0.2.0"
+   git push origin v0.2.0
    ```
 
 3. Add GitHub **Topics** (suggested): `agent-skills`, `markdown`, `knowledge-base`, `debugging`, `mcp`, `codex`, `claude`, `cursor`, `openclaw`, `devtools`.
@@ -50,9 +50,9 @@ Checklist for shipping **Problem Solution Recorder** to GitHub, ClawdHub, and lo
    clawhub publish ./skill/problem-solution-recorder \
      --slug problem-solution-recorder \
      --name "Problem Solution Recorder" \
-     --version 0.1.0 \
+     --version 0.2.0 \
      --tags "knowledge-base,debugging,markdown,agents" \
-     --changelog "See CHANGELOG.md for 0.1.0"
+     --changelog "See CHANGELOG.md for 0.2.0"
    ```
 
 4. Notes:

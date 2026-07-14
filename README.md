@@ -3,7 +3,7 @@
 > Markdown-native problem solving memory for AI tools and independent developers.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
-[![Skill version](https://img.shields.io/badge/skill-0.1.0-blue)](./skill/problem-solution-recorder/SKILL.md)
+[![Skill version](https://img.shields.io/badge/skill-0.2.0-blue)](./skill/problem-solution-recorder/SKILL.md)
 ![Platforms](https://img.shields.io/static/v1?label=platforms&message=Codex%20%7C%20Claude%20%7C%20Cursor%20%7C%20Agents%20%7C%20OpenClaw&color=lightgrey)
 
 <details>
