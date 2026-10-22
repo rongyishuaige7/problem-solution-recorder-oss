@@ -3,7 +3,7 @@
 > 面向 AI 工具和独立开发者的 Markdown 问题解决记忆库。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
-[![Skill version](https://img.shields.io/badge/skill-0.2.0-blue)](./skill/problem-solution-recorder/SKILL.md)
+[![Skill version](https://img.shields.io/badge/skill-0.3.0-blue)](./skill/problem-solution-recorder/SKILL.md)
 
 [![English README](https://img.shields.io/badge/docs-English-0f62fe)](README.md)
 中文说明
@@ -16,7 +16,8 @@
 - 同时维护人类索引 `INDEX.md` 和 AI 索引 `AI_SUMMARY_INDEX.md`。
 - 支持通过环境变量、项目标记或 XDG 配置定位知识库根目录。
 - 提供记录、索引、校验、本地安装的一组辅助脚本。
-- 自带知识库密钥扫描，便于提交和发布前检查敏感内容。
+- 自带知识库密钥扫描（可 `--allow` 白名单），便于提交和发布前检查敏感内容。
+- 新增记录会按表头写入既有索引，兼容 7 列（`ID/日期/标题/工具/状态/关键根因/记录`）的旧知识库。
 
 ## 快速开始
 

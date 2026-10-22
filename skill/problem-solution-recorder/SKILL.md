@@ -1,6 +1,6 @@
 ---
 name: problem-solution-recorder
-version: 0.2.0
+version: 0.3.0
 license: MIT
 description: Maintain a configurable problem-solution knowledge base for solved incidents, debugging sessions, reusable troubleshooting patterns, and periodic reviews. Use when the user asks to record, archive, review, summarize, search, or preserve a solved issue; when a multi-step debugging task involving CLI tools, MCP, APIs, permissions, configs, dependencies, build errors, adapters, or AI tool behavior is completed; or when the user wants to reuse lessons from previous incidents.
 metadata:
@@ -157,6 +157,12 @@ If no repository-native checker exists, run:
 
 ```bash
 ./scripts/check-kb.sh "$PROBLEM_SOLUTION_KB_ROOT"
+```
+
+If the checker flags benign technical text (for example a filename containing `sk-` or a `/cross-session:` slash command), do not delete the context. Add a narrow ERE line to an allowlist file and pass `--allow`:
+
+```bash
+./scripts/check-kb.sh "$PROBLEM_SOLUTION_KB_ROOT" --allow .psr-secrets-allow
 ```
 
 If write permission is unavailable, output the complete Markdown record and the exact index entries that should be added.

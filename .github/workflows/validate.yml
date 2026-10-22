@@ -29,3 +29,18 @@ jobs:
 
       - name: Smoke test
         run: skill/problem-solution-recorder/scripts/smoke-test.sh
+
+  validate-macos:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Validate skill structure
+        run: skill/problem-solution-recorder/scripts/validate-skill.sh
+
+      - name: Scan example knowledge base
+        run: skill/problem-solution-recorder/scripts/check-kb.sh examples/minimal-knowledge-base
+
+      - name: Smoke test
+        run: skill/problem-solution-recorder/scripts/smoke-test.sh

@@ -40,25 +40,12 @@ Checklist for shipping **Problem Solution Recorder** to GitHub, ClawdHub, and lo
 
 3. Add GitHub **Topics** (suggested): `agent-skills`, `markdown`, `knowledge-base`, `debugging`, `mcp`, `codex`, `claude`, `cursor`, `openclaw`, `devtools`.
 
-## ClawdHub (OpenClaw registry)
+## ClawdHub (OpenClaw registry) — not planned
 
-1. Install and log in to the **ClawHub** CLI (`clawhub`).
-2. Accept license terms on [clawhub.ai](https://clawhub.ai) if the CLI instructs you to.
-3. Publish **only** the skill directory:
-
-   ```bash
-   clawhub publish ./skill/problem-solution-recorder \
-     --slug problem-solution-recorder \
-     --name "Problem Solution Recorder" \
-     --version 0.2.0 \
-     --tags "knowledge-base,debugging,markdown,agents" \
-     --changelog "See CHANGELOG.md for 0.2.0"
-   ```
-
-4. Notes:
-   - Duplicate `version` values are rejected — always bump `SKILL.md` for a new publish.
-   - Registry bundles are size-limited (on the order of tens of MB); keep binaries and large assets out of the skill folder.
-   - If your CLI documents `--accept-license` (or similar), use it in CI/non-interactive environments.
+This project does not publish to ClawdHub. The skill is distributed by cloning the
+repository and installing locally (`install.sh --symlink` or `--copy`). Keep the
+`metadata.openclaw` block in `SKILL.md` for OpenClaw users who install the folder
+manually, but do not run `clawhub publish`.
 
 ## Post-publish verification
 

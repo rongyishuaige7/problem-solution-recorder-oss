@@ -3,7 +3,7 @@
 > Markdown-native problem solving memory for AI tools and independent developers.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
-[![Skill version](https://img.shields.io/badge/skill-0.2.0-blue)](./skill/problem-solution-recorder/SKILL.md)
+[![Skill version](https://img.shields.io/badge/skill-0.3.0-blue)](./skill/problem-solution-recorder/SKILL.md)
 ![Platforms](https://img.shields.io/static/v1?label=platforms&message=Codex%20%7C%20Claude%20%7C%20Cursor%20%7C%20Agents%20%7C%20OpenClaw&color=lightgrey)
 
 <details>
@@ -84,6 +84,7 @@ An agent skill for maintaining a configurable **problem–solution knowledge bas
 - Resolves the knowledge base root through env, project marker, or XDG config.
 - Ships helper scripts for recording, indexing, validation, and local installs.
 - Adds a secret scanner for knowledge base content before sharing or publishing.
+- Writes index rows into existing tables, including 7-column `ID | 日期 | ...` layouts used by older knowledge bases.
 
 ## Quick start
 
@@ -242,7 +243,7 @@ _Add screenshots or a short screen recording under [`docs/media/`](docs/media/) 
 
 Agents should redact API keys, tokens, cookies, passwords, private keys, authorization codes, and bearer tokens. Use `[REDACTED]` for secret values.
 
-`check-kb.sh` scans your Markdown knowledge base for likely leaked secrets before sharing, committing, or regenerating indexes.
+`check-kb.sh` scans your Markdown knowledge base for likely leaked secrets before sharing, committing, or regenerating indexes. Benign technical text (filenames containing `sk-`, `/cross-session:` commands, local `session_id` values) is ignored; add a narrow ERE line to an allowlist file and pass `--allow <file>` when you need an exception.
 
 ## Contributing
 
