@@ -2,7 +2,6 @@
 set -euo pipefail
 
 SCRIPT_DIR="$( ( unset CDPATH; cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd -P ) )"
-SKILL_DIR="$( ( unset CDPATH; cd -P -- "$SCRIPT_DIR/.." >/dev/null 2>&1 && pwd -P ) )"
 RESOLVE="$SCRIPT_DIR/resolve-kb-root.sh"
 
 usage() {
@@ -18,7 +17,9 @@ Writes:
   <kb>/bin/lib/ids.sh
   <kb>/bin/lib/index.sh
   <kb>/bin/lib/secrets.sh
-  <kb>/bin/psr
+
+The `psr` CLI stays in the skill (install it with `install.sh --bin`); a knowledge
+base keeps `bin/qs` for standalone use.
 
 The knowledge base CLI (bin/qs) and the skill scripts must use the same files;
 --check reports drift without writing and exits 1 when they differ.
@@ -70,26 +71,6 @@ for file in record-fields.awk lock.sh ids.sh index.sh secrets.sh; do
   cp "$src" "$dest/$file"
   printf '[synced] %s\n' "$dest/$file"
 done
-
-# psr 入口
-psr_src="$SKILL_DIR/bin/psr"
-psr_dst="$root/bin/psr"
-if [[ "$check_only" -eq 1 ]]; then
-  if [[ ! -f "$psr_dst" ]]; then
-    printf '[missing] %s\n' "$psr_dst" >&2
-    drift=1
-  elif ! cmp -s "$psr_src" "$psr_dst"; then
-    printf '[drift] %s differs from %s\n' "$psr_dst" "$psr_src" >&2
-    drift=1
-  else
-    printf '[ok] %s\n' "$psr_dst"
-  fi
-else
-  mkdir -p "$root/bin"
-  cp "$psr_src" "$psr_dst"
-  chmod +x "$psr_dst"
-  printf '[synced] %s\n' "$psr_dst"
-fi
 
 if [[ "$check_only" -eq 1 && "$drift" -ne 0 ]]; then
   printf 'Run sync-kb-lib.sh without --check to update the knowledge base copies.\n' >&2
