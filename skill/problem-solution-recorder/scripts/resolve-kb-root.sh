@@ -23,10 +23,12 @@ trim_file_value() {
 
 validate_root() {
   local root="$1"
+  local resolved=""
   [[ -n "$root" ]] || return 1
   [[ -d "$root" ]] || return 1
-  [[ -f "$root/AI入口.md" ]] || return 1
-  printf '%s\n' "$root"
+  resolved="$( ( unset CDPATH; cd -P -- "$root" >/dev/null 2>&1 && pwd -P ) )" || return 1
+  [[ -f "$resolved/AI入口.md" ]] || return 1
+  printf '%s\n' "$resolved"
 }
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
@@ -51,6 +53,12 @@ while :; do
   marker="$dir/.problem-solution-root"
   if [[ -f "$marker" ]]; then
     root="$(trim_file_value "$marker")"
+    # 相对路径按 marker 所在目录解析，而不是当前工作目录。
+    case "$root" in
+      /*) ;;
+      "") ;;
+      *) root="$dir/$root" ;;
+    esac
     validate_root "$root" && exit 0
     printf 'Marker file exists but points to an invalid root: %s\n' "$marker" >&2
     exit 1
@@ -63,6 +71,11 @@ config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
 for config_file in "$config_home/problem-solution-recorder/root" "$HOME/.config/problem-solution-recorder/root"; do
   [[ -f "$config_file" ]] || continue
   root="$(trim_file_value "$config_file")"
+  case "$root" in
+    /*) ;;
+    "") ;;
+    *) root="$(dirname "$config_file")/$root" ;;
+  esac
   validate_root "$root" && exit 0
   printf 'Config file exists but points to an invalid root: %s\n' "$config_file" >&2
   exit 1

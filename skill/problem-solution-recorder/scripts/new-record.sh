@@ -9,7 +9,19 @@ usage() {
 Create a new problem-solution record skeleton and refresh the AI summary index.
 
 Usage:
-  new-record.sh "Issue title" [--root /path/to/kb] [--date YYYY-MM-DD] [--tools "codex,claude"] [--tags "mcp,search"]
+  new-record.sh "Issue title" [options]
+
+Options:
+  --root <path>        Knowledge base root (default: resolved automatically)
+  --date YYYY-MM-DD    Record date (default: today)
+  --tools "a,b"        tools front matter list
+  --tags "a,b"         tags front matter list
+  --slug <ascii-slug>  Filename topic (default: slugified title)
+  --template <path>    Record template (default: <root>/_templates/问题记录模板.md)
+  --no-lock            Skip the knowledge base write lock (tests only)
+
+Writes are serialized with <root>/.psr.lock so concurrent agents cannot
+allocate the same sequence number or lose index rows.
 EOF
 }
 
@@ -18,29 +30,20 @@ root_arg=""
 date_value="$(date +%F)"
 tools_value=""
 tags_value=""
+slug_arg=""
+template_arg=""
+use_lock=1
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --root)
-      root_arg="${2:-}"
-      shift 2
-      ;;
-    --date)
-      date_value="${2:-}"
-      shift 2
-      ;;
-    --tools)
-      tools_value="${2:-}"
-      shift 2
-      ;;
-    --tags)
-      tags_value="${2:-}"
-      shift 2
-      ;;
-    -h|--help)
-      usage
-      exit 0
-      ;;
+    --root) root_arg="${2:-}"; shift 2 ;;
+    --date) date_value="${2:-}"; shift 2 ;;
+    --tools) tools_value="${2:-}"; shift 2 ;;
+    --tags) tags_value="${2:-}"; shift 2 ;;
+    --slug) slug_arg="${2:-}"; shift 2 ;;
+    --template) template_arg="${2:-}"; shift 2 ;;
+    --no-lock) use_lock=0; shift ;;
+    -h|--help) usage; exit 0 ;;
     *)
       if [[ -z "$title" ]]; then
         title="$1"
@@ -59,34 +62,101 @@ if [[ -z "$title" ]]; then
   exit 2
 fi
 
-case "$date_value" in
-  ????-??-??) ;;
-  *)
-    printf 'Invalid date, expected YYYY-MM-DD: %s\n' "$date_value" >&2
-    exit 2
-    ;;
-esac
+valid_date() {
+  local d="$1"
+  local out=""
+  [[ "$d" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || return 1
+  out="$(date -d "$d" +%F 2>/dev/null || date -j -f "%Y-%m-%d" "$d" +%F 2>/dev/null || true)"
+  [[ "$out" == "$d" ]]
+}
+
+if ! valid_date "$date_value"; then
+  printf 'Invalid date, expected a real YYYY-MM-DD date: %s\n' "$date_value" >&2
+  exit 2
+fi
 
 root="$("$RESOLVE" "$root_arg")"
 year="${date_value%%-*}"
 year_dir="$root/records/$year"
 mkdir -p "$year_dir"
 
-slug="$(printf '%s' "$title" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^[:alnum:]]+/-/g; s/^-+//; s/-+$//' | cut -c 1-48)"
+slug=""
+if [[ -n "$slug_arg" ]]; then
+  slug="$(printf '%s' "$slug_arg" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//; s/-+/-/g' | cut -c 1-48)"
+  [[ -n "$slug" ]] || {
+    printf 'Slug is empty after normalization: %s\n' "$slug_arg" >&2
+    exit 2
+  }
+else
+  slug="$(printf '%s' "$title" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^[:alnum:]]+/-/g; s/^-+//; s/-+$//' | cut -c 1-48)"
+fi
 [[ -n "$slug" ]] || slug="issue"
 
+lock_dir="$root/.psr.lock"
+
+lock_mtime() {
+  stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || printf '0'
+}
+
+acquire_lock() {
+  local waited=0
+  local age now
+  while ! mkdir "$lock_dir" 2>/dev/null; do
+    if [[ -d "$lock_dir" ]]; then
+      now="$(date +%s)"
+      age=$(( now - $(lock_mtime "$lock_dir") ))
+      [[ "$age" -lt 0 ]] && age=0
+      lock_pid=""
+      [[ -f "$lock_dir/pid" ]] && lock_pid="$(cat "$lock_dir/pid" 2>/dev/null || true)"
+      # 只有“年龄够大且持有者进程已不存在”才视为陈旧锁，避免误删活跃锁。
+      if [[ "$age" -gt 300 ]]; then
+        if [[ -z "$lock_pid" ]] || ! kill -0 "$lock_pid" 2>/dev/null; then
+          printf 'Removing stale lock (age %ss, pid %s): %s\n' "$age" "${lock_pid:-unknown}" "$lock_dir" >&2
+          rm -rf "$lock_dir" 2>/dev/null || true
+          continue
+        fi
+      fi
+    fi
+    sleep 0.2
+    waited=$(( waited + 1 ))
+    if [[ "$waited" -gt 50 ]]; then
+      printf 'Another writer holds the lock: %s\n' "$lock_dir" >&2
+      printf 'If no other process is running, remove it manually.\n' >&2
+      return 1
+    fi
+  done
+  printf '%s\n' "$$" > "$lock_dir/pid"
+  return 0
+}
+
+release_lock() {
+  rm -rf "$lock_dir" 2>/dev/null || true
+}
+
+if [[ "$use_lock" -eq 1 ]]; then
+  acquire_lock || exit 1
+  trap release_lock EXIT INT TERM
+fi
+
+# 序号允许超过三位：旧实现只认三位，到 1000 后会重新给出已存在的编号并覆盖文件。
 max_seq=0
 while IFS= read -r existing; do
   base="$(basename "$existing")"
-  seq_part="$(printf '%s\n' "$base" | sed -n -E "s/^${date_value}-([0-9]{3})-.*/\\1/p")"
+  seq_part="$(printf '%s\n' "$base" | sed -n -E "s/^${date_value}-([0-9]{3,})-.*/\\1/p")"
   [[ -n "$seq_part" ]] || continue
   seq_num=$((10#$seq_part))
   (( seq_num > max_seq )) && max_seq="$seq_num"
 done < <(find "$year_dir" -maxdepth 1 -type f -name "${date_value}-*.md" | sort)
 
 next_seq="$(printf '%03d' "$((max_seq + 1))")"
-record_rel="records/$year/${date_value}-${next_seq}-${slug}.md"
+record_id="${date_value}-${next_seq}"
+record_rel="records/$year/${record_id}-${slug}.md"
 record_path="$root/$record_rel"
+
+if [[ -e "$record_path" ]]; then
+  printf 'Record already exists: %s\n' "$record_path" >&2
+  exit 1
+fi
 
 csv_to_yaml_array() {
   local raw="$1"
@@ -125,9 +195,9 @@ yaml_tags="$(csv_to_yaml_array "$tags_value")"
 safe_title="${title//\\/\\\\}"
 safe_title="${safe_title//\"/\\\"}"
 
-cat > "$record_path" <<EOF
+front_matter="$(cat <<EOF
 ---
-id: ${date_value}-${next_seq}
+id: $record_id
 title: "$safe_title"
 date: "$date_value"
 status: draft
@@ -137,7 +207,11 @@ systems: []
 tags: $yaml_tags
 summary: ""
 ---
+EOF
+)"
 
+builtin_body() {
+  cat <<EOF
 # $title
 
 ## 一句话结论
@@ -178,9 +252,6 @@ Important config files:
 ## 排查时间线
 
 1. 做了什么检查：
-   - 观察：
-   - 结论：
-2. 做了什么验证：
    - 观察：
    - 结论：
 
@@ -244,9 +315,48 @@ Important config files:
 - 最终配置
 - 可复用排查顺序
 EOF
+}
+
+# 模板优先级：--template > $root/_templates/问题记录模板.md > 内置骨架
+template_path="$template_arg"
+if [[ -z "$template_path" ]]; then
+  template_path="$root/_templates/问题记录模板.md"
+fi
+
+render_body() {
+  local body=""
+  if [[ -f "$template_path" ]]; then
+    body="$(
+      awk '
+        BEGIN { fm = 0 }
+        NR == 1 && $0 == "---" { fm = 1; next }
+        fm && $0 == "---" { fm = 0; next }
+        fm { next }
+        { print }
+      ' "$template_path"
+    )"
+  fi
+  if [[ -z "$body" ]]; then
+    builtin_body
+    return 0
+  fi
+  if printf '%s\n' "$body" | grep -qE '^#[[:space:]]'; then
+    printf '%s\n' "$body" | awk -v t="$title" 'BEGIN { done = 0 } !done && /^#[[:space:]]/ { print "# " t; done = 1; next } { print }'
+  else
+    printf '# %s\n\n%s\n' "$title" "$body"
+  fi
+}
+
+body="$(render_body)"
+
+record_tmp="$(mktemp "$year_dir/.${record_id}.XXXXXX")"
+{
+  printf '%s\n\n' "$front_matter"
+  printf '%s\n' "$body"
+} > "$record_tmp"
+mv "$record_tmp" "$record_path"
 
 index_path="$root/INDEX.md"
-record_id="${date_value}-${next_seq}"
 
 if [[ ! -f "$index_path" ]]; then
   {
@@ -268,24 +378,27 @@ if ! grep -Fq "$record_rel" "$index_path"; then
   elif [[ -n "$header_line" ]]; then
     index_row="| $date_value | $index_title | draft | $index_tools | $index_tags | [$record_rel]($record_rel) |"
   else
-    printf 'INDEX.md 中找不到表格表头（| ID | ... 或 | Date | ...），未写入索引行。\n' >&2
+    printf 'INDEX.md has no recognizable table header (| ID | ... or | Date | ...); index row not written.\n' >&2
     index_row=""
   fi
 
   if [[ -n "$index_row" ]]; then
+    # 表格按日期倒序：插到第一条比新记录更旧的行之前；
+    # 若新记录比所有行都旧，则插到最后一行之后（而不是顶部）。
     insert_after="$(awk -v key="$record_id" '
       /^\|[[:space:]]*[0-9]{4}-[0-9]{2}-[0-9]{2}/ {
         line = $0
         sub(/^\|[[:space:]]*/, "", line)
         sub(/[[:space:]]*\|.*/, "", line)
+        if (!first) { first = NR; first_id = line }
+        last = NR; last_id = line
         if (!found && line < key) { print NR - 1; found = 1; exit }
-        if (!first) { first = NR }
-        last = NR
       }
       END {
         if (found) exit
-        if (first) print first - 1
-        else print 0
+        if (!first) { print 0; exit }
+        if (key > first_id) { print first - 1; exit }
+        print last
       }
     ' "$index_path")"
 
