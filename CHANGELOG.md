@@ -30,6 +30,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Draft partition in the summary index is driven by status only; an archived record
   with a missing conclusion stays visible (doctor still reports the placeholder).
+- `install.sh --bin` only links the command; it no longer installs the skill into every
+  tool directory as a side effect.
+
+### Fixed
+
+- `bin/psr` follows symlinks, so a `~/.local/bin/psr` link still finds its skill
+  directory and configuration.
 
 
 ## [0.5.1] - 2026-10-22

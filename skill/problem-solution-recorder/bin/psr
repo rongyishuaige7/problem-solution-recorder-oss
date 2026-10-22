@@ -1,8 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SELF="$( ( unset CDPATH; cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd -P ) )"
-SKILL_DIR="$( ( unset CDPATH; cd -P -- "$SELF/.." >/dev/null 2>&1 && pwd -P ) )"
+SELF="${BASH_SOURCE[0]}"
+# 跟随符号链接（install.sh --bin 会把 psr 链接到 ~/.local/bin）
+while [[ -L "$SELF" ]]; do
+  link="$(readlink "$SELF")"
+  case "$link" in
+    /*) SELF="$link" ;;
+    *) SELF="$(dirname "$SELF")/$link" ;;
+  esac
+done
+SELF="$( ( unset CDPATH; cd -P -- "$(dirname -- "$SELF")" >/dev/null 2>&1 && pwd -P ) )/$(basename "$SELF")"
+SKILL_DIR="$( ( unset CDPATH; cd -P -- "$(dirname -- "$SELF")/.." >/dev/null 2>&1 && pwd -P ) )"
 SCRIPTS="$SKILL_DIR/scripts"
 LIB="$SCRIPTS/lib"
 

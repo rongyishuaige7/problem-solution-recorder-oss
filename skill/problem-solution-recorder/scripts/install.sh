@@ -77,7 +77,12 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ "${#TARGETS[@]}" -eq 0 ]]; then
-  TARGETS=("codex" "claude" "cursor" "agents" "openclaw")
+  if [[ "$BIN_INSTALL" -eq 1 ]]; then
+    # --bin 只安装命令，不隐式安装 skill 目录
+    TARGETS=()
+  else
+    TARGETS=("codex" "claude" "cursor" "agents" "openclaw")
+  fi
 fi
 
 # --dir 只装一个目标，避免同一个目录被多个默认目标重复处理。
@@ -294,7 +299,7 @@ if [[ "$ACTION" == "uninstall" ]]; then
     uninstall_one "$target"
   done
 else
-  for target in "${TARGETS[@]}"; do
+  for target in ${TARGETS[@]+"${TARGETS[@]}"}; do
     install_one "$target"
   done
 fi
