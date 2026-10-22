@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-22
+
+### Added
+
+- `scripts/lib/record-fields.awk`: the single record parser (front matter, inline
+  arrays, multi-line lists, fenced code, section caps) used by the summary index,
+  `rebuild-index.sh`, and `doctor-local.sh`.
+- `scripts/lib/lock.sh` plus `sync-kb-lib.sh`: one lock (`<root>/.psr.lock`) and one
+  parser shared with a knowledge base's own CLI; `--check` reports vendored drift.
+
+### Changed
+
+- Lock protocol unified: `new-record.sh` and `rebuild-index.sh` take the same lock,
+  so the skill and `bin/qs` can no longer write the same knowledge base at once.
+- Signal handling terminates the operation (`exit 130`) instead of releasing the
+  lock and continuing; release only removes a lock whose pid file matches this
+  process.
+- `check-kb.sh` and `qs check` share value-level exception rules and masking.
+
+### Fixed
+
+- ShellCheck SC2016 in `update-ai-summary-index.sh` (Markdown backticks inside
+  single-quoted printf formats) broke the Ubuntu CI job before validation ran.
+- Summary/rebuild reported success after an unreadable record because failures in
+  the process substitution never reached the main script; parsing now runs into a
+  temp file and the index is left untouched on any read error or short record count.
+- `doctor-local.sh` truncated IDs to three digits (1000/1001 looked duplicated),
+  skipped link checks when `records/` was empty, and mis-parsed rows whose title
+  contained an escaped `|`, hiding real status drift.
+- `qs check` still filtered whole lines: `[REDACTED]` on the same line suppressed a
+  real key, grep errors were swallowed, and values were printed unmasked.
+- `web/generate-data.js` kept its own front-matter parser, so `tools: ["codex", "mcp"]`
+  produced `["codex"` / `"mcp"]` filter entries; inline arrays are now normalized.
+
+
 ## [0.4.0] - 2026-10-22
 
 ### Added
@@ -95,7 +130,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `agents/*.yaml` metadata for multiple runtimes.
 - GitHub Actions workflow for validation and smoke tests.
 
-[Unreleased]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.1.0...v0.2.0

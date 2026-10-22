@@ -3,7 +3,7 @@
 > Markdown-native problem solving memory for AI tools and independent developers.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
-[![Skill version](https://img.shields.io/badge/skill-0.4.0-blue)](./skill/problem-solution-recorder/SKILL.md)
+[![Skill version](https://img.shields.io/badge/skill-0.5.0-blue)](./skill/problem-solution-recorder/SKILL.md)
 ![Platforms](https://img.shields.io/static/v1?label=platforms&message=Codex%20%7C%20Claude%20%7C%20Cursor%20%7C%20Agents%20%7C%20OpenClaw&color=lightgrey)
 
 <details>
@@ -85,7 +85,8 @@ An agent skill for maintaining a configurable **problem–solution knowledge bas
 - Ships helper scripts for recording, indexing, validation, and local installs.
 - Adds a secret scanner for knowledge base content before sharing or publishing.
 - Writes index rows into existing tables, including 7-column `ID | 日期 | ...` layouts used by older knowledge bases.
-- Serializes concurrent writes with a knowledge base lock; sequence numbers keep growing past 999.
+- Serializes concurrent writes with one shared knowledge base lock (`<root>/.psr.lock`); sequence numbers keep growing past 999.
+- Ships one canonical record parser (`scripts/lib/record-fields.awk`) used by the summary index, the index rebuild, and the doctor; `sync-kb-lib.sh` vendors it into a knowledge base so its own CLI reads records the same way.
 - Rebuilds the human index from records (`rebuild-index.sh --check`) and diagnoses index/record drift (`doctor-local.sh`).
 
 ## Quick start

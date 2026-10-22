@@ -3,7 +3,7 @@
 > 面向 AI 工具和独立开发者的 Markdown 问题解决记忆库。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
-[![Skill version](https://img.shields.io/badge/skill-0.4.0-blue)](./skill/problem-solution-recorder/SKILL.md)
+[![Skill version](https://img.shields.io/badge/skill-0.5.0-blue)](./skill/problem-solution-recorder/SKILL.md)
 
 [![English README](https://img.shields.io/badge/docs-English-0f62fe)](README.md)
 中文说明
@@ -18,7 +18,8 @@
 - 提供记录、索引、校验、本地安装的一组辅助脚本。
 - 自带知识库密钥扫描（可 `--allow` 白名单），便于提交和发布前检查敏感内容。
 - 新增记录会按表头写入既有索引，兼容 7 列（`ID/日期/标题/工具/状态/关键根因/记录`）的旧知识库。
-- 并发写入用知识库锁串行化，序号超过 999 继续递增；索引可从记录重建，doctor 会检查断链与状态漂移。
+- 并发写入用同一把知识库锁（`.psr.lock`）串行化，序号超过 999 继续递增；索引可从记录重建，doctor 会检查断链与状态漂移。
+- 只有一份记录解析器（`scripts/lib/record-fields.awk`），摘要、索引重建与 doctor 共用；`sync-kb-lib.sh` 把它复制进知识库，`qs` 不再各写一套。
 
 ## 快速开始
 

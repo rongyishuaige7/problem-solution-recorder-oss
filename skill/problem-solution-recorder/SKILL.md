@@ -1,6 +1,6 @@
 ---
 name: problem-solution-recorder
-version: 0.4.0
+version: 0.5.0
 license: MIT
 description: Maintain a configurable problem-solution knowledge base for solved incidents, debugging sessions, reusable troubleshooting patterns, and periodic reviews. Use when the user asks to record, archive, review, summarize, search, or preserve a solved issue; when a multi-step debugging task involving CLI tools, MCP, APIs, permissions, configs, dependencies, build errors, adapters, or AI tool behavior is completed; or when the user wants to reuse lessons from previous incidents.
 metadata:
@@ -69,6 +69,7 @@ Use the bundled helper scripts when the repository does not provide a stronger n
 ./scripts/new-record.sh "Issue title"
 ./scripts/update-ai-summary-index.sh
 ./scripts/rebuild-index.sh
+./scripts/sync-kb-lib.sh
 ./scripts/print-prompt.sh global-rule
 ./scripts/doctor-local.sh
 ./scripts/check-kb.sh
@@ -141,6 +142,21 @@ For copyable prompts and global-rule snippets, use:
 ./scripts/print-prompt.sh global-rule
 ./scripts/print-prompt.sh hook
 ```
+
+## Shared Parsing And Locking
+
+One parser and one lock govern every writer:
+
+- `scripts/lib/record-fields.awk` is the only record parser (front matter, inline
+  arrays, multi-line lists, fenced code, section caps). The summary index, the
+  INDEX.md rebuild, and the doctor all call it.
+- `scripts/lib/lock.sh` implements `<root>/.psr.lock`. Every writer — skill scripts
+  and the knowledge base's own CLI — uses the same lock name, so they exclude each
+  other. Signals terminate the operation instead of releasing the lock and
+  continuing, and a process only removes a lock whose pid file still matches it.
+- `scripts/sync-kb-lib.sh` copies both files into `<kb>/bin/lib/`; run
+  `sync-kb-lib.sh --check` to detect drift. A knowledge base CLI must load the
+  vendored copies rather than embedding its own parser.
 
 ## Data Integrity
 
