@@ -1,6 +1,6 @@
 ---
 name: problem-solution-recorder
-version: 0.3.0
+version: 0.4.0
 license: MIT
 description: Maintain a configurable problem-solution knowledge base for solved incidents, debugging sessions, reusable troubleshooting patterns, and periodic reviews. Use when the user asks to record, archive, review, summarize, search, or preserve a solved issue; when a multi-step debugging task involving CLI tools, MCP, APIs, permissions, configs, dependencies, build errors, adapters, or AI tool behavior is completed; or when the user wants to reuse lessons from previous incidents.
 metadata:
@@ -68,10 +68,15 @@ Use the bundled helper scripts when the repository does not provide a stronger n
 ```bash
 ./scripts/new-record.sh "Issue title"
 ./scripts/update-ai-summary-index.sh
+./scripts/rebuild-index.sh
 ./scripts/print-prompt.sh global-rule
 ./scripts/doctor-local.sh
 ./scripts/check-kb.sh
 ```
+
+`new-record.sh` serializes writes with `<root>/.psr.lock`, so concurrent agents cannot
+allocate the same sequence number or lose index rows. It renders the record from the
+knowledge base's own `_templates/问题记录模板.md` when present.
 
 Use the repository CLI when available and more capable:
 
@@ -137,6 +142,14 @@ For copyable prompts and global-rule snippets, use:
 ./scripts/print-prompt.sh hook
 ```
 
+## Data Integrity
+
+- `new-record.sh` holds `<root>/.psr.lock` (mkdir-based, stale after 300s with a dead pid).
+- Record files are written to a temp file and renamed, so a crash cannot leave half a record.
+- `INDEX.md` rows are inserted in date order and keep the existing 6- or 7-column schema.
+- `rebuild-index.sh` regenerates the human index from record front matter; `--check` reports staleness without writing.
+- `doctor-local.sh` verifies duplicate IDs, broken index links, records missing from the index, status drift, and placeholder conclusions.
+
 ## Localization
 
 The bundled minimal knowledge base and helper scripts (`new-record.sh`, `update-ai-summary-index.sh`) use Chinese Markdown headings for record sections (for example `一句话结论`, `原始现象`). That is an intentional default for this template. To use English-only headings, replace the templates under `_templates/` and adjust the section names in `scripts/update-ai-summary-index.sh` if you still want automatic AI index extraction.
@@ -164,5 +177,8 @@ If the checker flags benign technical text (for example a filename containing `s
 ```bash
 ./scripts/check-kb.sh "$PROBLEM_SOLUTION_KB_ROOT" --allow .psr-secrets-allow
 ```
+
+Exit codes are meaningful: `0` clean, `1` potential secrets, `2` the scan could not
+complete (unreadable file, invalid allowlist). Treat `2` as "unknown", never as clean.
 
 If write permission is unavailable, output the complete Markdown record and the exact index entries that should be added.

@@ -3,7 +3,7 @@
 > Markdown-native problem solving memory for AI tools and independent developers.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
-[![Skill version](https://img.shields.io/badge/skill-0.3.0-blue)](./skill/problem-solution-recorder/SKILL.md)
+[![Skill version](https://img.shields.io/badge/skill-0.4.0-blue)](./skill/problem-solution-recorder/SKILL.md)
 ![Platforms](https://img.shields.io/static/v1?label=platforms&message=Codex%20%7C%20Claude%20%7C%20Cursor%20%7C%20Agents%20%7C%20OpenClaw&color=lightgrey)
 
 <details>
@@ -85,6 +85,8 @@ An agent skill for maintaining a configurable **problem–solution knowledge bas
 - Ships helper scripts for recording, indexing, validation, and local installs.
 - Adds a secret scanner for knowledge base content before sharing or publishing.
 - Writes index rows into existing tables, including 7-column `ID | 日期 | ...` layouts used by older knowledge bases.
+- Serializes concurrent writes with a knowledge base lock; sequence numbers keep growing past 999.
+- Rebuilds the human index from records (`rebuild-index.sh --check`) and diagnoses index/record drift (`doctor-local.sh`).
 
 ## Quick start
 
@@ -217,6 +219,7 @@ skill/problem-solution-recorder/scripts/print-prompt.sh global-rule
 skill/problem-solution-recorder/scripts/print-prompt.sh hook
 skill/problem-solution-recorder/scripts/new-record.sh "Issue title"
 skill/problem-solution-recorder/scripts/update-ai-summary-index.sh
+skill/problem-solution-recorder/scripts/rebuild-index.sh "$PROBLEM_SOLUTION_KB_ROOT" --check
 skill/problem-solution-recorder/scripts/check-kb.sh "$PROBLEM_SOLUTION_KB_ROOT"
 ```
 

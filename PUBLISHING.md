@@ -1,6 +1,6 @@
 # Publishing runbook
 
-Checklist for shipping **Problem Solution Recorder** to GitHub, ClawdHub, and local installs.
+Checklist for shipping **Problem Solution Recorder** to GitHub and local installs. ClawdHub is not used.
 
 ## Pre-flight
 
@@ -19,7 +19,7 @@ Checklist for shipping **Problem Solution Recorder** to GitHub, ClawdHub, and lo
    ```bash
    gh repo create rongyishuaige7/problem-solution-recorder-oss --public --source=. --remote=origin
    git push -u origin main
-   git push origin v0.2.0
+   git push origin v0.4.0
    ```
 
    If you prefer a manual remote:
@@ -34,8 +34,8 @@ Checklist for shipping **Problem Solution Recorder** to GitHub, ClawdHub, and lo
 2. Tag releases:
 
    ```bash
-   git tag -a v0.2.0 -m "v0.2.0"
-   git push origin v0.2.0
+   git tag -a v0.4.0 -m "v0.4.0"
+   git push origin v0.4.0
    ```
 
 3. Add GitHub **Topics** (suggested): `agent-skills`, `markdown`, `knowledge-base`, `debugging`, `mcp`, `codex`, `claude`, `cursor`, `openclaw`, `devtools`.
@@ -49,7 +49,6 @@ manually, but do not run `clawhub publish`.
 
 ## Post-publish verification
 
-- [ ] ClawdHub listing shows the new version and readable description.
 - [ ] Fresh clone smoke test:
 
   ```bash
@@ -70,6 +69,6 @@ manually, but do not run `clawhub publish`.
 When posting to forums or newsletters, link to:
 
 - GitHub repository root for documentation and issues.
-- `skill/problem-solution-recorder/` subtree (or ClawdHub page) for skill-only consumers.
+- `skill/problem-solution-recorder/` subtree for skill-only consumers.
 
 Include one-line positioning: *Markdown-native incident archive with dual indexes and optional patterns/reviews.*
