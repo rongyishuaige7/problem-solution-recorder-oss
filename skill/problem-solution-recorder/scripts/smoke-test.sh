@@ -34,7 +34,8 @@ cleanup() {
 trap cleanup EXIT
 
 fail() {
-  printf '[fail] %s\n' "$*" >&2
+  # BASH_LINENO[0] 是调用 fail 的那一行，便于在 CI 日志里定位。
+  printf '[fail] %s (line %s)\n' "$*" "${BASH_LINENO[0]:-?}" >&2
   exit 1
 }
 
@@ -231,14 +232,18 @@ allow_rc=$?
 set -e
 [[ "$allow_rc" -eq 2 ]] || fail "invalid allowlist pattern exited $allow_rc (expected 2)"
 
-printf 'X=sk-proj-abcdefghijklmnopqrstuvwxyz012345\n' > "$kb_scan/records/2026/perm.md"
-chmod 000 "$kb_scan/records/2026/perm.md"
-set +e
-"$CHECK" "$kb_scan" --quiet >/dev/null 2>&1
-perm_rc=$?
-set -e
-chmod 644 "$kb_scan/records/2026/perm.md"
-[[ "$perm_rc" -eq 2 ]] || fail "unreadable file exited $perm_rc (expected 2: scan failed, not clean)"
+if [[ "$(id -u)" -eq 0 ]]; then
+  pass "密钥扫描：root 环境跳过无读权限用例"
+else
+  printf 'X=sk-proj-abcdefghijklmnopqrstuvwxyz012345\n' > "$kb_scan/records/2026/perm.md"
+  chmod 000 "$kb_scan/records/2026/perm.md"
+  set +e
+  "$CHECK" "$kb_scan" --quiet >/dev/null 2>&1
+  perm_rc=$?
+  set -e
+  chmod 644 "$kb_scan/records/2026/perm.md"
+  [[ "$perm_rc" -eq 2 ]] || fail "unreadable file exited $perm_rc (expected 2: scan failed, not clean)"
+fi
 pass "密钥扫描：路径/同行情景不漏报，错误码与脱敏正确"
 
 # ---------------------------------------------------------------- P3 安装 dry-run
@@ -252,16 +257,21 @@ kb_unread="$tmp/kb-unread"
 "$NEW" "Readable" --root "$kb_unread" --date 2099-09-09 >/dev/null
 "$SUMMARY" "$kb_unread" >/dev/null
 cp "$kb_unread/AI_SUMMARY_INDEX.md" "$tmp/summary-before"
-printf 'X=1\n' > "$kb_unread/records/2099/2099-09-10-001-locked.md"
-chmod 000 "$kb_unread/records/2099/2099-09-10-001-locked.md"
-set +e
-"$SUMMARY" "$kb_unread" >/dev/null 2>&1
-unread_rc=$?
-set -e
-chmod 644 "$kb_unread/records/2099/2099-09-10-001-locked.md"
-[[ "$unread_rc" -ne 0 ]] || fail "summary index reported success with an unreadable record"
-cmp -s "$tmp/summary-before" "$kb_unread/AI_SUMMARY_INDEX.md" || fail "summary index was overwritten despite a read failure"
-pass "不可读记录时摘要索引报错且不覆盖"
+if [[ "$(id -u)" -eq 0 ]]; then
+  # root 会绕过权限位，无法用 chmod 000 模拟读取失败（CI 与本地都是非 root）。
+  pass "不可读记录：root 环境跳过权限用例"
+else
+  printf 'X=1\n' > "$kb_unread/records/2099/2099-09-10-001-locked.md"
+  chmod 000 "$kb_unread/records/2099/2099-09-10-001-locked.md"
+  set +e
+  "$SUMMARY" "$kb_unread" >/dev/null 2>&1
+  unread_rc=$?
+  set -e
+  chmod 644 "$kb_unread/records/2099/2099-09-10-001-locked.md"
+  [[ "$unread_rc" -ne 0 ]] || fail "summary index reported success with an unreadable record"
+  cmp -s "$tmp/summary-before" "$kb_unread/AI_SUMMARY_INDEX.md" || fail "summary index was overwritten despite a read failure"
+  pass "不可读记录时摘要索引报错且不覆盖"
+fi
 
 # ---------------------------------------------------------------- 信号终止写入
 kb_sig="$tmp/kb-signal"

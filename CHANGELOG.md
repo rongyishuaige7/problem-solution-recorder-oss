@@ -41,10 +41,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   real key, grep errors were swallowed, and values were printed unmasked.
 - `web/generate-data.js` kept its own front-matter parser, so `tools: ["codex", "mcp"]`
   produced `["codex"` / `"mcp"]` filter entries; inline arrays are now normalized.
-- Lock mtime detection called `stat -f %m` first: GNU `stat -f` means "filesystem
-  status" and prints `?` for that directive, so any contended lock hit an arithmetic
-  error on Linux. The helper now tries GNU `-c %Y`, falls back to BSD `-f %m`, and
-  rejects non-numeric output.
+- Lock mtime detection called `stat -f %m` first. GNU `stat -f` means "filesystem
+  status": it prints the filesystem block to stdout and exits 1, so the BSD fallback
+  was concatenated with that output and any contended lock hit an arithmetic error
+  (concurrent writers died instantly, leaving one record). The helper now tries GNU
+  `-c %Y`, falls back to BSD `-f %m`, rejects non-numeric output, and never treats an
+  unknown mtime as "stale".
 
 
 ## [0.4.0] - 2026-10-22

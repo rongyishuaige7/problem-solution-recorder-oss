@@ -37,7 +37,7 @@ psr_lock_acquire() {
   local root="$1"
   local retries="${2:-${PSR_LOCK_RETRIES:-50}}"
   local lock="$root/$PSR_LOCK_NAME"
-  local waited=0 age now pid
+  local waited=0 age now pid mtime
 
   # 同进程可重入：调用方（例如 new-record → summary）已经持锁时不再等待。
   if [[ -f "$lock/pid" ]] && [[ "$(cat "$lock/pid" 2>/dev/null || true)" == "$$" ]]; then
@@ -48,16 +48,21 @@ psr_lock_acquire() {
   while ! mkdir "$lock" 2>/dev/null; do
     if [[ -d "$lock" ]]; then
       now="$(date +%s)"
-      age=$(( now - $(psr_lock_mtime "$lock") ))
-      [[ "$age" -lt 0 ]] && age=0
+      mtime="$(psr_lock_mtime "$lock")"
+      # mtime 未知时不要当成“很旧”：否则会在持有者刚建目录、还没写 pid 的
+      # 微秒窗口里误删活跃锁，导致两个进程同时进入临界区。
+      if [[ "$mtime" -eq 0 ]]; then
+        age=0
+      else
+        age=$(( now - mtime ))
+        [[ "$age" -lt 0 ]] && age=0
+      fi
       pid=""
       [[ -f "$lock/pid" ]] && pid="$(cat "$lock/pid" 2>/dev/null || true)"
-      if [[ "$age" -gt 300 ]]; then
-        if [[ -z "$pid" ]] || ! kill -0 "$pid" 2>/dev/null; then
-          printf 'Removing stale lock (age %ss, pid %s): %s\n' "$age" "${pid:-unknown}" "$lock" >&2
-          rm -rf "$lock" 2>/dev/null || true
-          continue
-        fi
+      if [[ "$age" -gt 300 && -n "$pid" ]] && ! kill -0 "$pid" 2>/dev/null; then
+        printf 'Removing stale lock (age %ss, pid %s): %s\n' "$age" "$pid" "$lock" >&2
+        rm -rf "$lock" 2>/dev/null || true
+        continue
       fi
     fi
     sleep 0.2
