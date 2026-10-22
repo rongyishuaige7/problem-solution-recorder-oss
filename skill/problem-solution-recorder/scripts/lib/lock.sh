@@ -29,6 +29,12 @@ psr_lock_acquire() {
   local lock="$root/$PSR_LOCK_NAME"
   local waited=0 age now pid
 
+  # 同进程可重入：调用方（例如 new-record → summary）已经持锁时不再等待。
+  if [[ -f "$lock/pid" ]] && [[ "$(cat "$lock/pid" 2>/dev/null || true)" == "$$" ]]; then
+    PSR_LOCK_HELD=1
+    return 0
+  fi
+
   while ! mkdir "$lock" 2>/dev/null; do
     if [[ -d "$lock" ]]; then
       now="$(date +%s)"

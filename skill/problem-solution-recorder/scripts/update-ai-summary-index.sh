@@ -5,7 +5,16 @@ SCRIPT_DIR="$( ( unset CDPATH; cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" >/de
 RESOLVE="$SCRIPT_DIR/resolve-kb-root.sh"
 PARSER="$SCRIPT_DIR/lib/record-fields.awk"
 
-root="$("$RESOLVE" "${1:-}")"
+root_arg=""
+use_lock=1
+for arg in "$@"; do
+  case "$arg" in
+    --no-lock) use_lock=0 ;;
+    *) [[ -z "$root_arg" ]] && root_arg="$arg" ;;
+  esac
+done
+
+root="$("$RESOLVE" "$root_arg")"
 records_dir="$root/records"
 target="$root/AI_SUMMARY_INDEX.md"
 
@@ -16,6 +25,12 @@ end_marker='<!-- PSR:END GENERATED -->'
   printf 'Missing record parser: %s\n' "$PARSER" >&2
   exit 1
 }
+
+if [[ "$use_lock" -eq 1 ]]; then
+  # shellcheck source=/dev/null
+  . "$SCRIPT_DIR/lib/lock.sh"
+  psr_lock_acquire "$root" || exit 1
+fi
 
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/psr-summary.XXXXXX")"
 gen_main="$tmp_dir/main"
@@ -28,8 +43,12 @@ backup=""
 
 cleanup() {
   rm -rf "$tmp_dir"
+  if [[ "$use_lock" -eq 1 ]]; then
+    psr_lock_release "$root"
+  fi
 }
 trap cleanup EXIT
+trap 'cleanup; exit 130' INT TERM HUP
 
 : > "$gen_main"
 : > "$gen_draft"

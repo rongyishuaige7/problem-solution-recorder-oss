@@ -19,8 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Lock protocol unified: `new-record.sh` and `rebuild-index.sh` take the same lock,
-  so the skill and `bin/qs` can no longer write the same knowledge base at once.
+- Lock protocol unified: `new-record.sh`, `update-ai-summary-index.sh`, and
+  `rebuild-index.sh` take the same lock, and `bin/qs` uses the same file, so no two
+  writers can touch one knowledge base at once.
 - Signal handling terminates the operation (`exit 130`) instead of releasing the
   lock and continuing; release only removes a lock whose pid file matches this
   process.

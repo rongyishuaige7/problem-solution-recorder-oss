@@ -296,7 +296,16 @@ shared_rc=$?
 set -e
 rm -rf "$kb_shared/.psr.lock"
 [[ "$shared_rc" -ne 0 ]] || fail "rebuild-index.sh ignored the knowledge base write lock"
-pass "rebuild-index 使用同一把 .psr.lock"
+
+mkdir "$kb_shared/.psr.lock"
+printf '999999\n' > "$kb_shared/.psr.lock/pid"
+set +e
+PSR_LOCK_RETRIES=1 "$SUMMARY" "$kb_shared" >/dev/null 2>&1
+summary_rc=$?
+set -e
+rm -rf "$kb_shared/.psr.lock"
+[[ "$summary_rc" -ne 0 ]] || fail "update-ai-summary-index.sh ignored the knowledge base write lock"
+pass "重建与摘要都使用同一把 .psr.lock"
 
 # ---------------------------------------------------------------- doctor：编号、空库、转义竖线
 kb_doc2="$tmp/kb-doctor2"

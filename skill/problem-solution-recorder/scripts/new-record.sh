@@ -381,7 +381,7 @@ if ! grep -Fq "$record_rel" "$index_path"; then
 fi
 
 if [[ -x "$SCRIPT_DIR/update-ai-summary-index.sh" ]]; then
-  "$SCRIPT_DIR/update-ai-summary-index.sh" "$root" >/dev/null
+  "$SCRIPT_DIR/update-ai-summary-index.sh" "$root" --no-lock >/dev/null
 fi
 
 printf '%s\n' "$record_path"
