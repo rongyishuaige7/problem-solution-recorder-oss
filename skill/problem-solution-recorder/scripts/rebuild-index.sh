@@ -10,7 +10,7 @@ usage() {
 Rebuild the human index (INDEX.md) from records/ front matter.
 
 Usage:
-  rebuild-index.sh [/path/to/kb] [--dry-run] [--check]
+  rebuild-index.sh [/path/to/kb] [--dry-run|--preview] [--check] [--overwrite-handwritten]
 
 Behavior:
   - Keeps the existing table schema: 6 columns (Date/Title/Status/Tools/Tags/
@@ -18,19 +18,25 @@ Behavior:
   - Preserves everything before the table header and after the last table row.
   - Rows are emitted in date-descending order.
   - Takes the knowledge base write lock (<root>/.psr.lock).
-  - --dry-run prints the new table instead of writing.
+  - A 7-column index keeps the existing title/tools/status/关键根因 cells by ID
+    (only date and link are refreshed); pass --overwrite-handwritten to rebuild
+    every cell from the records.
+  - --dry-run / --preview prints a diff instead of writing.
   - --check exits 1 when the file is out of date (no write).
+  - Writes are skipped when the result is byte-identical.
 EOF
 }
 
 root_arg=""
 dry_run=0
 check_only=0
+overwrite_handwritten=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --dry-run) dry_run=1; shift ;;
+    --dry-run|--preview) dry_run=1; shift ;;
     --check) check_only=1; shift ;;
+    --overwrite-handwritten) overwrite_handwritten=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *)
       if [[ -z "$root_arg" ]]; then
@@ -59,6 +65,8 @@ index="$root/INDEX.md"
 
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/psr-index-rebuild.XXXXXX")"
 
+# shellcheck source=/dev/null
+. "$SCRIPT_DIR/lib/index.sh"
 # shellcheck source=/dev/null
 . "$SCRIPT_DIR/lib/lock.sh"
 trap 'psr_lock_release "$root"; rm -rf "$tmp_dir"' EXIT
@@ -145,6 +153,9 @@ while IFS=$'\t' read -r tag field value; do
       cur_rel="$field"
       reset_fields
       ;;
+    '@W')
+      printf '[warn] %s: unsupported YAML for %s; treated as empty\n' "$field" "$value" >&2
+      ;;
     '@F')
       case "$field" in
         id) id="$value" ;;
@@ -161,6 +172,34 @@ while IFS=$'\t' read -r tag field value; do
 done < "$stream"
 emit_row
 
+# 7 列索引的“关键根因”常是手写内容：默认按 ID 保留，避免重建把它冲掉。
+if [[ "$schema" -eq 7 && "$overwrite_handwritten" -eq 0 && -f "$index" ]]; then
+  psr_index_rows "$index" > "$tmp_dir/existing.tsv"
+  if [[ -s "$tmp_dir/existing.tsv" ]]; then
+    LC_ALL=C awk -F'\037' -v OFS='\037' -v keepfile="$tmp_dir/existing.tsv" '
+      BEGIN {
+        while ((getline line < keepfile) > 0) {
+          n = split(line, p, "\037")
+          if (p[1] == "") continue
+          title[p[1]] = p[3]; tools[p[1]] = p[4]; status[p[1]] = p[5]; root[p[1]] = p[6]
+        }
+        close(keepfile)
+      }
+      {
+        if ($2 in title) {
+          # 已有行：标题/工具/状态/关键根因保留人工版本，只刷新日期与链接。
+          if (title[$2] != "") $4 = title[$2]
+          if (tools[$2] != "") $6 = tools[$2]
+          if (status[$2] != "") $5 = status[$2]
+          if (root[$2] != "" && root[$2] != "待补充" && root[$2] != "-") $8 = root[$2]
+        }
+        print
+      }
+    ' "$rows_raw" > "$tmp_dir/rows.merged"
+    mv "$tmp_dir/rows.merged" "$rows_raw"
+  fi
+fi
+
 rows="$tmp_dir/rows.md"
 : > "$rows"
 
@@ -172,10 +211,11 @@ LC_ALL=C sort -t "$(printf '\037')" -k3,3r -k2,2r "$rows_raw" | while IFS=$'\037
   [[ -n "$tags" ]] || tags="-"
   [[ -n "$sig" ]] || sig="-"
   if [[ ${#sig} -gt 200 ]]; then sig="${sig:0:197}…"; fi
-  title="$(printf '%s' "$title" | sed 's/|/\\|/g')"
-  sig="$(printf '%s' "$sig" | sed 's/|/\\|/g')"
-  tools="$(printf '%s' "$tools" | sed 's/|/\\|/g')"
-  tags="$(printf '%s' "$tags" | sed 's/|/\\|/g')"
+  # 纯 bash 转义，避免每行 4 次 sed 子进程。
+  title="${title//\\/\\\\}"; title="${title//|/\\|}"
+  sig="${sig//\\/\\\\}"; sig="${sig//|/\\|}"
+  tools="${tools//\\/\\\\}"; tools="${tools//|/\\|}"
+  tags="${tags//\\/\\\\}"; tags="${tags//|/\\|}"
   if [[ "$schema" -eq 7 ]]; then
     printf '| %s | %s | %s | %s | %s | %s | [查看](%s) |\n' "$id" "$date" "$title" "$tools" "$status" "$sig" "$rel" >> "$rows"
   else
@@ -237,7 +277,20 @@ if [[ "$check_only" -eq 1 ]]; then
 fi
 
 if [[ "$dry_run" -eq 1 ]]; then
-  cat "$new_file"
+  if [[ -f "$index" ]]; then
+    if cmp -s "$new_file" "$index"; then
+      printf '[ok] no changes (%s rows)\n' "$row_count"
+    else
+      diff -u "$index" "$new_file" || true
+    fi
+  else
+    cat "$new_file"
+  fi
+  exit 0
+fi
+
+if [[ -f "$index" ]] && cmp -s "$new_file" "$index"; then
+  printf 'Unchanged: %s (%s rows)\n' "$index" "$row_count"
   exit 0
 fi
 

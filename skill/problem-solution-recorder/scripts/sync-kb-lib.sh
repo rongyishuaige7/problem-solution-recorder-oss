@@ -14,6 +14,9 @@ Usage:
 Writes:
   <kb>/bin/lib/record-fields.awk
   <kb>/bin/lib/lock.sh
+  <kb>/bin/lib/ids.sh
+  <kb>/bin/lib/index.sh
+  <kb>/bin/lib/secrets.sh
 
 The knowledge base CLI (bin/qs) and the skill scripts must use the same files;
 --check reports drift without writing and exits 1 when they differ.
@@ -43,7 +46,7 @@ root="$("$RESOLVE" "$root_arg")"
 dest="$root/bin/lib"
 
 drift=0
-for file in record-fields.awk lock.sh; do
+for file in record-fields.awk lock.sh ids.sh index.sh secrets.sh; do
   src="$SCRIPT_DIR/lib/$file"
   [[ -f "$src" ]] || {
     printf 'Missing skill library: %s\n' "$src" >&2

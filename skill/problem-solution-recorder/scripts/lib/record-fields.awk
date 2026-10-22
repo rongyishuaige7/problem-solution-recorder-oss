@@ -26,6 +26,10 @@
 #   - Each section keeps at most `maxlines` (default 3) lines.
 #   - Values are never truncated here; callers apply their own length limits.
 
+function warn(key, reason) {
+  print "@W\t" rel "\t" key " " reason
+}
+
 function emit(k, v) {
   gsub(/\t/, " ", v)
   print "@F\t" k "\t" v
@@ -47,7 +51,7 @@ function emit_fm(   k, v) {
 }
 
 function reset() {
-  fm = 0; pending = ""; list = ""; fence = 0
+  fm = 0; pending = ""; list = ""; fence = 0; block = 0
   section = ""; out = ""; count = 0
   delete fmv
 }
@@ -92,6 +96,10 @@ fm && FNR > 1 && $0 == "---" {
 !fm && FNR == 1 && $0 == "---" { fm = 1; next }
 
 fm {
+  if (block) {
+    if ($0 ~ /^[[:space:]]/) next
+    block = 0
+  }
   if ($0 ~ /^[A-Za-z0-9_-]+:/) {
     if (pending != "") { fmv[pending] = list; pending = ""; list = "" }
     k = $0; sub(/:.*/, "", k)
@@ -101,12 +109,25 @@ fm {
       gsub(/"/, "", v)
       gsub(/[[:space:]]*,[[:space:]]*/, ", ", v)
     }
+    if (v == "|" || v == ">") {
+      # 块标量（| / >）不是本格式支持的写法：给出字段级诊断，按空值处理。
+      warn(k, "block-scalar")
+      block = 1
+      next
+    }
     if (v == "") { pending = k; list = "" } else { fmv[k] = v }
     next
   }
   if ($0 ~ /^[[:space:]]+-[[:space:]]*/) {
     it = $0; sub(/^[[:space:]]+-[[:space:]]*/, "", it); gsub(/^"|"$/, "", it)
     if (pending != "") list = (list == "" ? it : list ", " it)
+    next
+  }
+  if ($0 ~ /^[[:space:]]+[^[:space:]]/ && pending != "") {
+    # 嵌套映射等写法不支持：诊断一次，避免静默变成空值。
+    warn(pending, "nested-map")
+    pending = ""
+    list = ""
     next
   }
   next

@@ -348,4 +348,60 @@ if ! printf '%s' "$doctor_pipe_out" | grep -Fq "status differs"; then
 fi
 pass "doctor 处理 1000/1001、空库断链与转义竖线"
 
+# ---------------------------------------------------------------- 四位序号与空知识库
+kb_seq4="$tmp/kb-seq4"
+"$INIT" "$kb_seq4" >/dev/null
+mkdir -p "$kb_seq4/records/2099"
+: > "$kb_seq4/records/2099/2099-01-01-1000-a.md"
+: > "$kb_seq4/records/2099/2099-01-01-1001-b.md"
+seq4_path="$("$NEW" "Four digit" --root "$kb_seq4" --date 2099-01-01)"
+case "$seq4_path" in
+  *2099-01-01-1002-*) ;;
+  *) fail "four-digit sequence did not continue: $seq4_path" ;;
+esac
+pass "四位序号继续递增（1000/1001 → 1002）"
+
+kb_empty_new="$tmp/kb-empty-new"
+"$INIT" "$kb_empty_new" >/dev/null
+rm -rf "$kb_empty_new/records"
+mkdir -p "$kb_empty_new/records"
+rm -f "$kb_empty_new/INDEX.md"
+"$SUMMARY" "$kb_empty_new" >/dev/null || fail "summary failed on an empty knowledge base"
+[[ -f "$kb_empty_new/INDEX.md" ]] && fail "empty knowledge base should not have INDEX.md yet"
+"$NEW" "First record" --root "$kb_empty_new" --date 2099-04-04 >/dev/null || fail "first record failed in an empty knowledge base"
+[[ -f "$kb_empty_new/INDEX.md" ]] || fail "INDEX.md was not created for the first record"
+grep -Fq "first-record" "$kb_empty_new/INDEX.md" || fail "first record missing from INDEX.md"
+pass "空知识库：首条记录自动建索引"
+
+# ---------------------------------------------------------------- 7 列手写列保留
+kb_keep="$tmp/kb-keep"
+"$INIT" "$kb_keep" >/dev/null
+mkdir -p "$kb_keep/records/2098"
+cat > "$kb_keep/INDEX.md" <<'EOF'
+# 问题索引
+
+| ID | 日期 | 标题 | 工具/系统 | 状态 | 关键根因 | 记录 |
+|---|---|---|---|---|---|---|
+| 2098-01-01-001 | 2098-01-01 | handwritten | bash | 已解决 | 人工写的根因 | [查看](records/2098/2098-01-01-001-handwritten.md) |
+EOF
+printf -- '---\ntitle: "handwritten"\ndate: 2098-01-01\nstatus: solved\nsummary: "生成的摘要"\n---\n\n# handwritten\n\n## 一句话结论\n\n生成的摘要\n' > "$kb_keep/records/2098/2098-01-01-001-handwritten.md"
+"$REBUILD" "$kb_keep" >/dev/null
+grep -Fq "人工写的根因" "$kb_keep/INDEX.md" || fail "rebuild overwrote a hand-written root cause"
+"$REBUILD" "$kb_keep" --overwrite-handwritten >/dev/null
+grep -Fq "生成的摘要" "$kb_keep/INDEX.md" || fail "--overwrite-handwritten did not regenerate the cell"
+pass "重建保留手写列，显式覆盖才改写"
+
+# ---------------------------------------------------------------- YAML 诊断与无变化不写
+kb_yaml="$tmp/kb-yaml"
+"$INIT" "$kb_yaml" >/dev/null
+mkdir -p "$kb_yaml/records/2026"
+printf '%s\n' '---' 'title: "YAML 诊断"' 'date: 2026-06-06' 'status: solved' 'summary: |' '  块标量' 'tools:' '  codex: 1' '---' '' '# YAML 诊断' '' '## 一句话结论' '' '结论。' > "$kb_yaml/records/2026/2026-06-06-001-yaml.md"
+yaml_err="$tmp/yaml.err"
+"$SUMMARY" "$kb_yaml" >/dev/null 2>"$yaml_err"
+grep -Fq "unsupported YAML" "$yaml_err" || fail "unsupported YAML was not reported"
+cp "$kb_yaml/AI_SUMMARY_INDEX.md" "$tmp/yaml-before"
+"$SUMMARY" "$kb_yaml" >/dev/null 2>&1
+cmp -s "$tmp/yaml-before" "$kb_yaml/AI_SUMMARY_INDEX.md" || fail "unchanged records still rewrote the summary index"
+pass "YAML 字段级诊断；无变化时文件逐字节一致"
+
 printf '[ok] smoke test passed\n'

@@ -183,6 +183,9 @@ if [[ ${#files[@]} -gt 0 ]]; then
         cur_rel="$field"
         reset_record_vars
         ;;
+      '@W')
+        printf '[warn] %s: unsupported YAML for %s; treated as empty\n' "$field" "$value" >&2
+        ;;
       '@F')
         case "$field" in
           id) id="$value" ;;
@@ -240,6 +243,14 @@ if [[ -f "$target" ]]; then
 fi
 
 if [[ "$begin_count" -eq 1 && "$end_count" -eq 1 && -n "$begin_line" && -n "$end_line" && "$begin_line" -lt "$end_line" ]]; then
+  # 只有时间戳变化时保持文件逐字节不变，避免制造无意义的 Git 差异。
+  current_block="$(awk -v b="$begin_marker" -v e="$end_marker" '$0 == b { f = 1 } f { print } $0 == e { f = 0 }' "$target" | sed -E 's/^Generated: .*/Generated: X/')"
+  new_block="$(sed -E 's/^Generated: .*/Generated: X/' "$generated")"
+  if [[ "$current_block" == "$new_block" ]]; then
+    printf 'Unchanged: %s (%s entries, %s drafts)\n' "$target" "$records_main" "$records_draft"
+    exit 0
+  fi
+
   awk -v begin="$begin_marker" -v end="$end_marker" -v generated="$generated" '
     $0 == begin {
       while ((getline line < generated) > 0) {

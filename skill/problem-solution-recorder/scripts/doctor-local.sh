@@ -80,9 +80,11 @@ if [[ "$records_found" -gt 0 ]]; then
       [[ -n "$cur_rel" ]] || return 0
       printf '%s\037%s\037%s\n' "${cur_id:-$cur_rel}" "$cur_rel" "${cur_status:-unknown}" >> "$records_file"
     }
+    yaml_warnings=0
     while IFS=$'\t' read -r tag field value; do
       case "$tag" in
         '@R') emit_record_row; cur_rel="$field"; cur_id=""; cur_status="" ;;
+        '@W') yaml_warnings=$(( yaml_warnings + 1 )) ;;
         '@F')
           case "$field" in
             id) cur_id="$value" ;;
@@ -92,6 +94,10 @@ if [[ "$records_found" -gt 0 ]]; then
       esac
     done < "$tmp_dir/stream"
     emit_record_row
+    if [[ "$yaml_warnings" -gt 0 ]]; then
+      printf '[warn] %s record field(s) use unsupported YAML (block scalars or nested maps)\n' "$yaml_warnings"
+      warnings=$((warnings + 1))
+    fi
   else
     printf '[warn] record parser missing: %s\n' "$PARSER"
     warnings=$((warnings + 1))

@@ -76,6 +76,10 @@ if ! valid_date "$date_value"; then
 fi
 
 root="$("$RESOLVE" "$root_arg")"
+# shellcheck source=/dev/null
+. "$SCRIPT_DIR/lib/ids.sh"
+# shellcheck source=/dev/null
+. "$SCRIPT_DIR/lib/index.sh"
 year="${date_value%%-*}"
 year_dir="$root/records/$year"
 mkdir -p "$year_dir"
@@ -102,18 +106,8 @@ if [[ "$use_lock" -eq 1 ]]; then
   psr_lock_acquire "$root" || exit 1
 fi
 
-# 序号允许超过三位：旧实现只认三位，到 1000 后会重新给出已存在的编号并覆盖文件。
-max_seq=0
-while IFS= read -r existing; do
-  base="$(basename "$existing")"
-  seq_part="$(printf '%s\n' "$base" | sed -n -E "s/^${date_value}-([0-9]{3,})-.*/\\1/p")"
-  [[ -n "$seq_part" ]] || continue
-  seq_num=$((10#$seq_part))
-  (( seq_num > max_seq )) && max_seq="$seq_num"
-done < <(find "$year_dir" -maxdepth 1 -type f -name "${date_value}-*.md" | sort)
-
-next_seq="$(printf '%03d' "$((max_seq + 1))")"
-record_id="${date_value}-${next_seq}"
+# 序号由共享模块分配：三位起、超过 999 继续递增，避免覆盖同 ID 文件。
+record_id="$(psr_next_id "$year_dir" "$date_value")"
 record_rel="records/$year/${record_id}-${slug}.md"
 record_path="$root/$record_rel"
 
@@ -146,13 +140,6 @@ csv_to_yaml_array() {
   printf ']'
 }
 
-escape_md_cell() {
-  local value="$1"
-  value="$(printf '%s' "$value" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g; s/^[[:space:]]+//; s/[[:space:]]+$//')"
-  value="${value//\\/\\\\}"
-  value="${value//|/\\|}"
-  printf '%s' "$value"
-}
 
 yaml_tools="$(csv_to_yaml_array "$tools_value")"
 yaml_tags="$(csv_to_yaml_array "$tags_value")"
@@ -331,52 +318,12 @@ if [[ ! -f "$index_path" ]]; then
 fi
 
 if ! grep -Fq "$record_rel" "$index_path"; then
-  index_title="$(escape_md_cell "$title")"
-  index_tools="$(escape_md_cell "${tools_value:-"-"}")"
-  index_tags="$(escape_md_cell "${tags_value:-"-"}")"
-  header_line="$(grep -m1 -E '^\|[[:space:]]*(ID|Date)[[:space:]]*\|' "$index_path" || true)"
-
-  # 按已有表头选择列布局：7 列（ID/日期/标题/工具/状态/关键根因/记录）或 6 列（Date/Title/Status/Tools/Tags/Record）。
-  if [[ "$header_line" == *"关键根因"* ]]; then
-    index_row="| $record_id | $date_value | $index_title | $index_tools | draft | 待补充 | [查看]($record_rel) |"
-  elif [[ -n "$header_line" ]]; then
-    index_row="| $date_value | $index_title | draft | $index_tools | $index_tags | [$record_rel]($record_rel) |"
-  else
+  if ! grep -qE '^\|[[:space:]]*(ID|Date)[[:space:]]*\|' "$index_path"; then
     printf 'INDEX.md has no recognizable table header (| ID | ... or | Date | ...); index row not written.\n' >&2
-    index_row=""
-  fi
-
-  if [[ -n "$index_row" ]]; then
-    # 表格按日期倒序：插到第一条比新记录更旧的行之前；
-    # 若新记录比所有行都旧，则插到最后一行之后（而不是顶部）。
-    insert_after="$(awk -v key="$record_id" '
-      /^\|[[:space:]]*[0-9]{4}-[0-9]{2}-[0-9]{2}/ {
-        line = $0
-        sub(/^\|[[:space:]]*/, "", line)
-        sub(/[[:space:]]*\|.*/, "", line)
-        if (!first) { first = NR; first_id = line }
-        last = NR; last_id = line
-        if (!found && line < key) { print NR - 1; found = 1; exit }
-      }
-      END {
-        if (found) exit
-        if (!first) { print 0; exit }
-        if (key > first_id) { print first - 1; exit }
-        print last
-      }
-    ' "$index_path")"
-
-    if [[ -z "$insert_after" || "$insert_after" -eq 0 ]]; then
-      insert_after="$(grep -nE '^\|[-:| ]+\|$' "$index_path" | head -n 1 | cut -d: -f1 || true)"
-    fi
-    if [[ -z "$insert_after" ]]; then
-      printf '%s\n' "$index_row" >> "$index_path"
-    else
-      index_tmp="$(mktemp "${TMPDIR:-/tmp}/psr-index.XXXXXX")"
-      # 用环境变量传行内容：awk -v 会把 \| 解释成 |，破坏 Markdown 转义。
-      PSR_INDEX_ROW="$index_row" awk -v n="$insert_after" 'NR == n { print; print ENVIRON["PSR_INDEX_ROW"]; next } { print }' "$index_path" > "$index_tmp"
-      mv "$index_tmp" "$index_path"
-    fi
+  else
+    index_schema="$(psr_index_schema "$index_path")"
+    index_row="$(psr_index_row "$index_schema" "$record_id" "$date_value" "$title" "${tools_value:--}" "${tags_value:--}" draft "待补充" "$record_rel")"
+    psr_index_insert "$index_path" "$index_row" "$record_id"
   fi
 fi
 

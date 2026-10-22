@@ -56,6 +56,9 @@ fi
 
 root="$("$RESOLVE" "$root_arg")"
 
+# shellcheck source=/dev/null
+. "$SCRIPT_DIR/lib/secrets.sh"
+
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/psr-secrets.XXXXXX")"
 trap 'rm -rf "$tmp_dir"' EXIT
 
@@ -86,10 +89,9 @@ fi
 # - session 规则只认 session_id/session_token/session_key 且要求长值，
 #   并排除 "-session:"、"/cross-session:" 这类斜杠命令；
 # - 只按“匹配到的值”判断例外，不按整行或路径判断。
-secret_pattern='(^|[^A-Za-z0-9_-])sk-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{20,}|Bearer[[:space:]]+[A-Za-z0-9._~+/=-]{30,}|BEGIN (RSA |OPENSSH |EC |DSA )?PRIVATE KEY|password[[:space:]]*[:=][[:space:]]*[^[:space:]]{8,}|passwd[[:space:]]*[:=][[:space:]]*[^[:space:]]{8,}|cookie[[:space:]]*[:=][[:space:]]*[^[:space:]]{20,}|(^|[^A-Za-z0-9_/-])session[_-]?(id|token|key)[[:space:]]*[:=][[:space:]]*[A-Za-z0-9._~+/=-]{24,}'
+secret_pattern="$PSR_SECRET_PATTERN"
 
 # 2) 校验白名单正则（非法正则必须报错，不能被 || true 吞掉）。
-allow_patterns=()
 if [[ -n "$allow_file" ]]; then
   while IFS= read -r raw; do
     pat="$(printf '%s' "$raw" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
@@ -103,7 +105,7 @@ if [[ -n "$allow_file" ]]; then
       printf 'Invalid allowlist pattern: %s\n' "$pat" >&2
       exit 2
     fi
-    allow_patterns+=("$pat")
+    PSR_SECRET_ALLOW+=("$pat")
   done < "$allow_file"
 fi
 
@@ -124,39 +126,6 @@ if [[ "$grep_rc" -eq 1 || ! -s "$files_list" ]]; then
   exit 0
 fi
 
-mask_value() {
-  local v="$1"
-  local secret="$1"
-  case "$v" in
-    *PRIVATE\ KEY*) printf '%s' "$v"; return 0 ;;
-  esac
-  case "$v" in
-    *[:=]*) secret="${v#*[:=]}"; secret="${secret# }" ;;
-  esac
-  if [[ ${#secret} -le 8 ]]; then
-    printf '<redacted>'
-    return 0
-  fi
-  printf '%s…%s' "${secret:0:4}" "${secret: -4}"
-}
-
-value_is_benign() {
-  local v="$1"
-  local pat
-  case "$v" in
-    *REDACTED*|*'<'*'>'*) return 0 ;;
-  esac
-  if printf '%s' "$v" | grep -qiE 'example|your[_-]|xxx|placeholder|dummy|masked|fixture|fake[_-]?key|content[-_]?url|local-only'; then
-    return 0
-  fi
-  for pat in ${allow_patterns[@]+"${allow_patterns[@]}"}; do
-    if printf '%s' "$v" | grep -qE -- "$pat"; then
-      return 0
-    fi
-  done
-  return 1
-}
-
 found=0
 while IFS= read -r file; do
   [[ -n "$file" ]] || continue
@@ -176,10 +145,10 @@ while IFS= read -r file; do
     # 去掉规则里捕获的前导边界字符
     value="$(printf '%s' "$value" | sed -E 's/^[^A-Za-z0-9_]+//')"
     [[ -n "$value" ]] || continue
-    if value_is_benign "$value"; then
+    if psr_secret_is_benign "$value"; then
       continue
     fi
-    printf '%s:%s: %s\n' "$file" "$lineno" "$(mask_value "$value")" >> "$findings"
+    printf '%s:%s: %s\n' "$file" "$lineno" "$(psr_secret_mask "$value")" >> "$findings"
     found=$(( found + 1 ))
   done < "$matches"
 done < "$files_list"

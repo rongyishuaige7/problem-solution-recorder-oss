@@ -1,6 +1,6 @@
 ---
 name: problem-solution-recorder
-version: 0.5.0
+version: 0.5.1
 license: MIT
 description: Maintain a configurable problem-solution knowledge base for solved incidents, debugging sessions, reusable troubleshooting patterns, and periodic reviews. Use when the user asks to record, archive, review, summarize, search, or preserve a solved issue; when a multi-step debugging task involving CLI tools, MCP, APIs, permissions, configs, dependencies, build errors, adapters, or AI tool behavior is completed; or when the user wants to reuse lessons from previous incidents.
 metadata:
@@ -70,6 +70,7 @@ Use the bundled helper scripts when the repository does not provide a stronger n
 ./scripts/update-ai-summary-index.sh
 ./scripts/rebuild-index.sh
 ./scripts/sync-kb-lib.sh
+./scripts/perf-check.sh 100
 ./scripts/print-prompt.sh global-rule
 ./scripts/doctor-local.sh
 ./scripts/check-kb.sh
@@ -148,8 +149,12 @@ For copyable prompts and global-rule snippets, use:
 One parser and one lock govern every writer:
 
 - `scripts/lib/record-fields.awk` is the only record parser (front matter, inline
-  arrays, multi-line lists, fenced code, section caps). The summary index, the
-  INDEX.md rebuild, and the doctor all call it.
+  arrays, multi-line lists, fenced code, section caps). It also emits field-level
+  warnings for unsupported YAML (block scalars, nested maps) instead of silently
+  turning them into empty values.
+- `scripts/lib/ids.sh` allocates record ids (three digits, growing past 999).
+- `scripts/lib/index.sh` owns INDEX.md schema detection, cell escaping, ordered
+  insertion, and row parsing (escape-aware).
 - `scripts/lib/lock.sh` implements `<root>/.psr.lock`. Every writer — skill scripts
   and the knowledge base's own CLI — uses the same lock name, so they exclude each
   other. Signals terminate the operation instead of releasing the lock and
@@ -163,7 +168,12 @@ One parser and one lock govern every writer:
 - `new-record.sh` holds `<root>/.psr.lock` (mkdir-based, stale after 300s with a dead pid).
 - Record files are written to a temp file and renamed, so a crash cannot leave half a record.
 - `INDEX.md` rows are inserted in date order and keep the existing 6- or 7-column schema.
-- `rebuild-index.sh` regenerates the human index from record front matter; `--check` reports staleness without writing.
+- `rebuild-index.sh` regenerates the human index from record front matter. A 7-column
+  index keeps its title/tools/status/关键根因 cells by ID (only date and link are
+  refreshed); `--overwrite-handwritten` rebuilds every cell, `--preview` shows a diff,
+  and `--check` reports staleness without writing.
+- Runs that would not change a file leave it byte-identical (summary index, INDEX.md),
+  so repeated maintenance does not create timestamp-only Git diffs.
 - `doctor-local.sh` verifies duplicate IDs, broken index links, records missing from the index, status drift, and placeholder conclusions.
 
 ## Localization

@@ -19,7 +19,7 @@ Checklist for shipping **Problem Solution Recorder** to GitHub and local install
    ```bash
    gh repo create rongyishuaige7/problem-solution-recorder-oss --public --source=. --remote=origin
    git push -u origin main
-   git push origin v0.5.0
+   git push origin v0.5.1
    ```
 
    If you prefer a manual remote:
@@ -34,8 +34,8 @@ Checklist for shipping **Problem Solution Recorder** to GitHub and local install
 2. Tag releases:
 
    ```bash
-   git tag -a v0.5.0 -m "v0.5.0"
-   git push origin v0.5.0
+   git tag -a v0.5.1 -m "v0.5.1"
+   git push origin v0.5.1
    ```
 
 3. Add GitHub **Topics** (suggested): `agent-skills`, `markdown`, `knowledge-base`, `debugging`, `mcp`, `codex`, `claude`, `cursor`, `openclaw`, `devtools`.

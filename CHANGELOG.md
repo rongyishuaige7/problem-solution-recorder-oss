@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-10-22
+
+### Added
+
+- `scripts/lib/ids.sh` (sequence allocation), `scripts/lib/index.sh` (schema detection,
+  escaping, ordered insertion, escape-aware row parsing), and `scripts/lib/secrets.sh`
+  (pattern, benign-value rules, masking). `new-record.sh`, `rebuild-index.sh`,
+  `check-kb.sh`, and `sync-kb-lib.sh` use them.
+- `rebuild-index.sh --preview` (diff) and `--overwrite-handwritten`; a 7-column index now
+  keeps its title/tools/status/关键根因 cells by ID, so rebuilding a real knowledge base
+  is non-destructive.
+- Field-level YAML diagnostics: block scalars and nested maps are reported per record
+  and field instead of silently becoming empty values.
+- `perf-check.sh`: 100-record cold/warm timings and byte-identical check.
+
+### Changed
+
+- Summary index and INDEX.md writes are skipped when the result is byte-identical, so
+  repeated maintenance no longer produces timestamp-only diffs.
+- `rebuild-index.sh` escapes cells in pure bash; 100 records: ~10.7s → under 0.5s.
+
+### Fixed
+
+- A 7-column rebuild used to rewrite every row (statuses and tool names changed case);
+  it now preserves the human-authored cells and only refreshes date and link.
+
+
 ## [0.5.0] - 2026-10-22
 
 ### Added
@@ -137,7 +164,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `agents/*.yaml` metadata for multiple runtimes.
 - GitHub Actions workflow for validation and smoke tests.
 
-[Unreleased]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.2.0...v0.3.0
