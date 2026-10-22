@@ -20,7 +20,17 @@ PSR_LOCK_NAME=".psr.lock"
 PSR_LOCK_HELD=0
 
 psr_lock_mtime() {
-  stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || printf '0'
+  local m=""
+  # GNU stat 用 -c，BSD/macOS 用 -f；GNU 的 -f 是“文件系统状态”，
+  # 直接把它当 mtime 会得到非数字并让算术表达式报错。
+  m="$(stat -c %Y "$1" 2>/dev/null)" || m=""
+  if [[ -z "$m" ]]; then
+    m="$(stat -f %m "$1" 2>/dev/null)" || m=""
+  fi
+  case "$m" in
+    ''|*[!0-9]*) printf '0' ;;
+    *) printf '%s' "$m" ;;
+  esac
 }
 
 psr_lock_acquire() {
