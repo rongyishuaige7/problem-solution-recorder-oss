@@ -3,6 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$( ( unset CDPATH; cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd -P ) )"
 RESOLVE="$SCRIPT_DIR/resolve-kb-root.sh"
+PARSER="$SCRIPT_DIR/lib/record-fields.awk"
 
 usage() {
   cat <<'EOF'
@@ -14,9 +15,9 @@ Usage:
 Behavior:
   - Keeps the existing table schema: 6 columns (Date/Title/Status/Tools/Tags/
     Record) or 7 columns (ID/日期/标题/工具/系统/状态/关键根因/记录).
-  - Preserves everything before the table header and after the last table row
-    (for example a "常用标签" section).
+  - Preserves everything before the table header and after the last table row.
   - Rows are emitted in date-descending order.
+  - Takes the knowledge base write lock (<root>/.psr.lock).
   - --dry-run prints the new table instead of writing.
   - --check exits 1 when the file is out of date (no write).
 EOF
@@ -51,9 +52,18 @@ index="$root/INDEX.md"
   printf 'No records directory: %s\n' "$records_dir" >&2
   exit 1
 }
+[[ -f "$PARSER" ]] || {
+  printf 'Missing record parser: %s\n' "$PARSER" >&2
+  exit 1
+}
 
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/psr-index-rebuild.XXXXXX")"
-trap 'rm -rf "$tmp_dir"' EXIT
+
+# shellcheck source=/dev/null
+. "$SCRIPT_DIR/lib/lock.sh"
+trap 'psr_lock_release "$root"; rm -rf "$tmp_dir"' EXIT
+trap 'psr_lock_release "$root"; rm -rf "$tmp_dir"; exit 130' INT TERM HUP
+psr_lock_acquire "$root" || exit 1
 
 files=()
 while IFS= read -r f; do
@@ -65,113 +75,32 @@ if [[ ${#files[@]} -eq 0 ]]; then
   exit 1
 fi
 
-# 单次 awk：输出 rel<TAB>id<TAB>date<TAB>title<TAB>status<TAB>tools<TAB>tags<TAB>signature
-# signature = front matter summary > 根因分析首行 > 一句话结论首行
-extract_all() {
-  LC_ALL=C awk -v root="$root" '
-    function flush_section(   key) {
-      if (section == "") return
-      key = map[section]
-      if (key != "" && out != "" && val[key] == "") val[key] = out
-      section = ""; out = ""; count = 0
-    }
-    function emit_fm(   k, v) {
-      for (k in fmv) {
-        v = fmv[k]
-        gsub(/\t/, " ", v)
-        val[k] = v
-      }
-    }
-    function reset() {
-      fm = 0; pending = ""; list = ""; fence = 0
-      section = ""; out = ""; count = 0
-      delete fmv; delete val
-    }
-    function clean(s) {
-      gsub(/^[[:space:]]*([-*]+|[0-9]+\.)[[:space:]]+/, "", s)
-      gsub(/^[[:space:]]+|[[:space:]]+$/, "", s)
-      gsub(/[`*]/, "", s)
-      return s
-    }
-    BEGIN {
-      reset()
-      map["一句话结论"] = "summary"
-      map["根因分析"] = "root"
-      cap["summary"] = 1; cap["root"] = 1
-    }
-    FNR == 1 {
-      if (NR > 1) {
-        flush_section()
-        emit_fm()
-        rel = prev
-        if (index(rel, root "/") == 1) rel = substr(rel, length(root) + 2)
-        sig = val["summary"]
-        if (sig == "" || sig == "-") sig = val["root"]
-        gsub(/\t/, " ", sig)
-        printf "%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\n", rel, val["id"], val["date"], val["title"], val["status"], val["tools"], val["tags"], sig
-      }
-      reset()
-      prev = FILENAME
-    }
-    fm && FNR > 1 && $0 == "---" {
-      fm = 0
-      if (pending != "") { fmv[pending] = list; pending = ""; list = "" }
-      next
-    }
-    !fm && FNR == 1 && $0 == "---" { fm = 1; next }
-    fm {
-      if ($0 ~ /^[A-Za-z0-9_-]+:/) {
-        if (pending != "") { fmv[pending] = list; pending = ""; list = "" }
-        k = $0; sub(/:.*/, "", k)
-        v = $0; sub(/^[^:]*:[[:space:]]*/, "", v); gsub(/^"|"$/, "", v)
-        if (v ~ /^\[.*\]$/) {
-          gsub(/^\[|\]$/, "", v); gsub(/"/, "", v)
-          gsub(/[[:space:]]*,[[:space:]]*/, ", ", v)
-        }
-        if (v == "") { pending = k; list = "" } else { fmv[k] = v }
-        next
-      }
-      if ($0 ~ /^[[:space:]]+-[[:space:]]*/) {
-        it = $0; sub(/^[[:space:]]+-[[:space:]]*/, "", it); gsub(/^"|"$/, "", it)
-        if (pending != "") list = (list == "" ? it : list ", " it)
-        next
-      }
-      next
-    }
-    /^[[:space:]]*(```|~~~)/ { fence = !fence; next }
-    fence { next }
-    /^##[[:space:]]+/ {
-      flush_section()
-      section = $0
-      sub(/^##[[:space:]]+/, "", section)
-      sub(/[[:space:]]+$/, "", section)
-      next
-    }
-    {
-      if (section == "") next
-      key = map[section]
-      if (key == "") next
-      line = clean($0)
-      if (line == "" || line ~ /^\|/) next
-      if (count >= cap[key]) next
-      out = (out == "" ? line : out "; " line)
-      count++
-    }
-    END {
-      flush_section()
-      emit_fm()
-      rel = prev
-      if (index(rel, root "/") == 1) rel = substr(rel, length(root) + 2)
-      sig = val["summary"]
-      if (sig == "" || sig == "-") sig = val["root"]
-      gsub(/\t/, " ", sig)
-      printf "%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\n", rel, val["id"], val["date"], val["title"], val["status"], val["tools"], val["tags"], sig
-    }
-  ' "${files[@]}"
-}
+stream="$tmp_dir/stream"
+awk_err="$tmp_dir/awk.err"
 
-rows_raw="$tmp_dir/rows"
-extract_all > "$rows_raw"
+set +e
+LC_ALL=C awk -v root="$root" -v maxlines=2 -f "$PARSER" "${files[@]}" > "$stream" 2> "$awk_err"
+awk_rc=$?
+set -e
+
+if [[ "$awk_rc" -ne 0 ]]; then
+  cat "$awk_err" >&2
+  printf '[fail] could not read every record (awk exit %s); %s left unchanged.\n' "$awk_rc" "$index" >&2
+  exit 1
+fi
+parsed_records="$(grep -c '^@R' "$stream" || true)"
+expected_records=0
+for f in "${files[@]}"; do
+  [[ -s "$f" ]] && expected_records=$(( expected_records + 1 ))
+done
+if [[ "$parsed_records" -ne "$expected_records" ]]; then
+  cat "$awk_err" >&2
+  printf '[fail] parsed %s of %s non-empty records; %s left unchanged.\n' "$parsed_records" "$expected_records" "$index" >&2
+  exit 1
+fi
+if [[ "$expected_records" -ne "${#files[@]}" ]]; then
+  printf '[warn] skipped %s empty record file(s)\n' "$(( ${#files[@]} - expected_records ))" >&2
+fi
 
 # 选择列布局
 schema=6
@@ -179,13 +108,17 @@ if [[ -f "$index" ]] && grep -qE '^\|[[:space:]]*ID[[:space:]]*\|' "$index" && g
   schema=7
 fi
 
-rows="$tmp_dir/rows.md"
-: > "$rows"
-
-# 按日期倒序（同日期按 id 倒序）
-LC_ALL=C sort -t "$(printf '\037')" -k3,3r -k2,2r "$rows_raw" | while IFS=$'\037' read -r rel id date title status tools tags sig; do
-  [[ -n "$rel" ]] || continue
-  base="${rel##*/}"; base="${base%.md}"
+rows_raw="$tmp_dir/rows.tsv"
+: > "$rows_raw"
+cur_rel=""
+reset_fields() {
+  id=""; date=""; title=""; status=""; tools=""; tags=""; sig=""; fm_sig=""
+}
+reset_fields
+emit_row() {
+  [[ -n "$cur_rel" ]] || return 0
+  local base="${cur_rel##*/}"
+  base="${base%.md}"
   [[ -n "$date" ]] || date="${base:0:10}"
   if [[ -z "$id" ]]; then
     if [[ "$base" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{3} ]]; then
@@ -194,6 +127,45 @@ LC_ALL=C sort -t "$(printf '\037')" -k3,3r -k2,2r "$rows_raw" | while IFS=$'\037
       id="${date}-${base}"
     fi
   fi
+  [[ -n "$title" ]] || title="$cur_rel"
+  [[ -n "$status" ]] || status="unknown"
+  [[ -n "$tools" ]] || tools="-"
+  [[ -n "$tags" ]] || tags="-"
+  local signature="$fm_sig"
+  [[ -n "$signature" ]] || signature="$sig"
+  [[ -n "$signature" ]] || signature="-"
+  printf '%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\n' \
+    "$cur_rel" "$id" "$date" "$title" "$status" "$tools" "$tags" "$signature" >> "$rows_raw"
+}
+
+while IFS=$'\t' read -r tag field value; do
+  case "$tag" in
+    '@R')
+      emit_row
+      cur_rel="$field"
+      reset_fields
+      ;;
+    '@F')
+      case "$field" in
+        id) id="$value" ;;
+        title) title="$value" ;;
+        date) date="$value" ;;
+        status) status="$value" ;;
+        tools) tools="$value" ;;
+        tags) tags="$value" ;;
+        signature) sig="$value" ;;
+        fm_summary) fm_sig="$value" ;;
+      esac
+      ;;
+  esac
+done < "$stream"
+emit_row
+
+rows="$tmp_dir/rows.md"
+: > "$rows"
+
+LC_ALL=C sort -t "$(printf '\037')" -k3,3r -k2,2r "$rows_raw" | while IFS=$'\037' read -r rel id date title status tools tags sig; do
+  [[ -n "$rel" ]] || continue
   [[ -n "$title" ]] || title="$rel"
   [[ -n "$status" ]] || status="unknown"
   [[ -n "$tools" ]] || tools="-"
@@ -213,16 +185,12 @@ done
 
 if [[ "$schema" -eq 7 ]]; then
   header='| ID | 日期 | 标题 | 工具/系统 | 状态 | 关键根因 | 记录 |'
-else
-  header='| Date | Title | Status | Tools | Tags | Record |'
-fi
-if [[ "$schema" -eq 7 ]]; then
   separator='|---|---|---|---|---|---|---|'
 else
+  header='| Date | Title | Status | Tools | Tags | Record |'
   separator='| --- | --- | --- | --- | --- | --- |'
 fi
 
-# 保留表头之前与最后一行表格之后的内容
 before="$tmp_dir/before"
 after="$tmp_dir/after"
 : > "$before"

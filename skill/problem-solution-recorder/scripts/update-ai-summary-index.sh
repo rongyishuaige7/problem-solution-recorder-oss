@@ -3,6 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$( ( unset CDPATH; cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd -P ) )"
 RESOLVE="$SCRIPT_DIR/resolve-kb-root.sh"
+PARSER="$SCRIPT_DIR/lib/record-fields.awk"
 
 root="$("$RESOLVE" "${1:-}")"
 records_dir="$root/records"
@@ -11,14 +12,22 @@ target="$root/AI_SUMMARY_INDEX.md"
 begin_marker='<!-- PSR:BEGIN GENERATED -->'
 end_marker='<!-- PSR:END GENERATED -->'
 
-gen_main="$(mktemp "${TMPDIR:-/tmp}/psr-summary-main.XXXXXX")"
-gen_draft="$(mktemp "${TMPDIR:-/tmp}/psr-summary-draft.XXXXXX")"
-generated="$(mktemp "${TMPDIR:-/tmp}/psr-summary-generated.XXXXXX")"
-merged="$(mktemp "${TMPDIR:-/tmp}/psr-summary-merged.XXXXXX")"
+[[ -f "$PARSER" ]] || {
+  printf 'Missing record parser: %s\n' "$PARSER" >&2
+  exit 1
+}
+
+tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/psr-summary.XXXXXX")"
+gen_main="$tmp_dir/main"
+gen_draft="$tmp_dir/draft"
+generated="$tmp_dir/generated"
+merged="$tmp_dir/merged"
+stream="$tmp_dir/stream"
+awk_err="$tmp_dir/awk.err"
 backup=""
 
 cleanup() {
-  rm -f "$gen_main" "$gen_draft" "$generated" "$merged"
+  rm -rf "$tmp_dir"
 }
 trap cleanup EXIT
 
@@ -28,14 +37,8 @@ trap cleanup EXIT
 records_main=0
 records_draft=0
 cur_rel=""
-
+BT='`'
 CAP=""
-cap_text() {
-  CAP="$1"
-  if [[ ${#CAP} -gt 300 ]]; then
-    CAP="${CAP:0:297}…"
-  fi
-}
 
 reset_record_vars() {
   id=""
@@ -55,6 +58,13 @@ reset_record_vars() {
 }
 
 reset_record_vars
+
+cap_text() {
+  CAP="$1"
+  if [[ ${#CAP} -gt 300 ]]; then
+    CAP="${CAP:0:297}…"
+  fi
+}
 
 emit_record() {
   [[ -n "$cur_rel" ]] || return 0
@@ -90,14 +100,14 @@ emit_record() {
   fi
 
   if [[ "$is_draft" -eq 1 ]]; then
-    printf -- '- `%s` — %s (status: %s)\n' "$cur_rel" "$title_value" "$status_value" >> "$gen_draft"
+    printf -- '- %s%s%s — %s (status: %s)\n' "$BT" "$cur_rel" "$BT" "$title_value" "$status_value" >> "$gen_draft"
     records_draft=$(( records_draft + 1 ))
     return 0
   fi
 
   {
     printf '### %s - %s\n\n' "$id" "$title_value"
-    printf -- '- source: `%s`\n' "$cur_rel"
+    printf -- '- source: %s%s%s\n' "$BT" "$cur_rel" "$BT"
     printf -- '- date: %s\n' "$date_value"
     printf -- '- status: %s\n' "$status_value"
     printf -- '- tools: %s\n' "$tools_value"
@@ -112,149 +122,69 @@ emit_record() {
   records_main=$(( records_main + 1 ))
 }
 
-# 单次 awk 遍历全部记录：
-# - front matter 支持行内数组与多行列表
-# - 章节摘要跳过代码围栏，限制行数；不做字节级 substr（macOS awk 会切断多字节字符）
-# - 输出 @R（记录开始）与 @F（字段）两类制表符分隔行，由 bash 组装
+files=()
 if [[ -d "$records_dir" ]]; then
-  files=()
   while IFS= read -r f; do
     files+=("$f")
   done < <(find "$records_dir" -type f -name '*.md' | sort)
+fi
 
-  if [[ ${#files[@]} -gt 0 ]]; then
-    while IFS=$'\t' read -r tag field value; do
-      case "$tag" in
-        '@R')
-          emit_record
-          cur_rel="$field"
-          reset_record_vars
-          ;;
-        '@F')
-          case "$field" in
-            id) id="$value" ;;
-            title) title_value="$value" ;;
-            date) date_value="$value" ;;
-            status) status_value="$value" ;;
-            tools) tools_value="$value" ;;
-            tags) tags_value="$value" ;;
-            summary) summary="$value" ;;
-            fm_summary) fm_summary="$value" ;;
-            signature) signature="$value" ;;
-            root) root_cause="$value" ;;
-            fix) final_fix="$value" ;;
-            verify) verification="$value" ;;
-            reuse) reusable_lesson="$value" ;;
-            follow) follow_up="$value" ;;
-          esac
-          ;;
-      esac
-    done < <(
-      # LC_ALL=C：macOS 自带 awk 在 UTF-8 locale 下对含中文的行会报
-      # "towc: multibyte conversion failure" 并中断整批记录，这里按字节处理。
-      LC_ALL=C awk -v root="$root" '
-        function emit(k, v) {
-          gsub(/\t/, " ", v)
-          print "@F\t" k "\t" v
-        }
-        function flush_section(   key) {
-          if (section == "") return
-          key = map[section]
-          if (key != "" && out != "") emit(key, out)
-          section = ""; out = ""; count = 0
-        }
-        function emit_fm(   k, v) {
-          for (k in fmv) {
-            v = fmv[k]
-            if (k == "summary") k = "fm_summary"
-            emit(k, v)
-          }
-        }
-        function reset() {
-          fm = 0; pending = ""; list = ""; fence = 0
-          section = ""; out = ""; count = 0
-          delete fmv
-        }
-        BEGIN {
-          reset()
-          map["一句话结论"] = "summary"
-          map["原始现象"] = "signature"
-          map["根因分析"] = "root"
-          map["最终解决方案"] = "fix"
-          map["验证方法"] = "verify"
-          map["复用经验"] = "reuse"
-          map["后续事项"] = "follow"
-          cap["summary"] = 2; cap["signature"] = 3; cap["root"] = 3
-          cap["fix"] = 3; cap["verify"] = 2; cap["reuse"] = 3; cap["follow"] = 3
-        }
-        FNR == 1 {
-          if (NR > 1) {
-            flush_section()
-            emit_fm()
-          }
-          reset()
-          rel = FILENAME
-          if (index(rel, root "/") == 1) rel = substr(rel, length(root) + 2)
-          print "@R\t" rel
-        }
-        fm && FNR > 1 && $0 == "---" {
-          fm = 0
-          if (pending != "") { fmv[pending] = list; pending = ""; list = "" }
-          next
-        }
-        !fm && FNR == 1 && $0 == "---" { fm = 1; next }
-        fm {
-          if ($0 ~ /^[A-Za-z0-9_-]+:/) {
-            if (pending != "") { fmv[pending] = list; pending = ""; list = "" }
-            k = $0; sub(/:.*/, "", k)
-            v = $0; sub(/^[^:]*:[[:space:]]*/, "", v); gsub(/^"|"$/, "", v)
-            if (v ~ /^\[.*\]$/) {
-              gsub(/^\[|\]$/, "", v)
-              gsub(/"/, "", v)
-              gsub(/[[:space:]]*,[[:space:]]*/, ", ", v)
-            }
-            if (v == "") { pending = k; list = "" } else { fmv[k] = v }
-            next
-          }
-          if ($0 ~ /^[[:space:]]+-[[:space:]]*/) {
-            it = $0; sub(/^[[:space:]]+-[[:space:]]*/, "", it); gsub(/^"|"$/, "", it)
-            if (pending != "") list = (list == "" ? it : list ", " it)
-            next
-          }
-          next
-        }
-        /^[[:space:]]*(```|~~~)/ { fence = !fence; next }
-        fence { next }
-        /^##[[:space:]]+/ {
-          flush_section()
-          section = $0
-          sub(/^##[[:space:]]+/, "", section)
-          sub(/[[:space:]]+$/, "", section)
-          next
-        }
-        {
-          if (section == "") next
-          key = map[section]
-          if (key == "") next
-          line = $0
-          gsub(/^[[:space:]]*([-*]+|[0-9]+\.)[[:space:]]+/, "", line)
-          gsub(/^[[:space:]]+/, "", line)
-          gsub(/[[:space:]]+$/, "", line)
-          if (line == "" || line ~ /^\|/) next
-          gsub(/[`*]/, "", line)
-          if (count >= cap[key]) next
-          if (length(out) >= 300) next
-          out = (out == "" ? line : out "; " line)
-          count++
-        }
-        END {
-          flush_section()
-          emit_fm()
-        }
-      ' "${files[@]}"
-    )
-    emit_record
+# 先把全部记录解析到一个临时文件，再读它：
+# 进程替换里的读取失败不会传回主流程，旧实现因此会在解析出错时覆盖索引并返回成功。
+if [[ ${#files[@]} -gt 0 ]]; then
+  set +e
+  LC_ALL=C awk -v root="$root" -v maxlines=3 -f "$PARSER" "${files[@]}" > "$stream" 2> "$awk_err"
+  awk_rc=$?
+  set -e
+
+  if [[ "$awk_rc" -ne 0 ]]; then
+    cat "$awk_err" >&2
+    printf '[fail] could not read every record (awk exit %s); %s left unchanged.\n' "$awk_rc" "$target" >&2
+    exit 1
   fi
+
+  parsed_records="$(grep -c '^@R' "$stream" || true)"
+  expected_records=0
+  for f in "${files[@]}"; do
+    [[ -s "$f" ]] && expected_records=$(( expected_records + 1 ))
+  done
+  if [[ "$parsed_records" -ne "$expected_records" ]]; then
+    cat "$awk_err" >&2
+    printf '[fail] parsed %s of %s non-empty records; %s left unchanged.\n' "$parsed_records" "$expected_records" "$target" >&2
+    exit 1
+  fi
+  if [[ "$expected_records" -ne "${#files[@]}" ]]; then
+    printf '[warn] skipped %s empty record file(s)\n' "$(( ${#files[@]} - expected_records ))" >&2
+  fi
+
+  while IFS=$'\t' read -r tag field value; do
+    case "$tag" in
+      '@R')
+        emit_record
+        cur_rel="$field"
+        reset_record_vars
+        ;;
+      '@F')
+        case "$field" in
+          id) id="$value" ;;
+          title) title_value="$value" ;;
+          date) date_value="$value" ;;
+          status) status_value="$value" ;;
+          tools) tools_value="$value" ;;
+          tags) tags_value="$value" ;;
+          summary) summary="$value" ;;
+          fm_summary) fm_summary="$value" ;;
+          signature) signature="$value" ;;
+          root) root_cause="$value" ;;
+          fix) final_fix="$value" ;;
+          verify) verification="$value" ;;
+          reuse) reusable_lesson="$value" ;;
+          follow) follow_up="$value" ;;
+        esac
+        ;;
+    esac
+  done < "$stream"
+  emit_record
 fi
 
 {

@@ -92,50 +92,14 @@ else
 fi
 [[ -n "$slug" ]] || slug="issue"
 
-lock_dir="$root/.psr.lock"
-
-lock_mtime() {
-  stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || printf '0'
-}
-
-acquire_lock() {
-  local waited=0
-  local age now
-  while ! mkdir "$lock_dir" 2>/dev/null; do
-    if [[ -d "$lock_dir" ]]; then
-      now="$(date +%s)"
-      age=$(( now - $(lock_mtime "$lock_dir") ))
-      [[ "$age" -lt 0 ]] && age=0
-      lock_pid=""
-      [[ -f "$lock_dir/pid" ]] && lock_pid="$(cat "$lock_dir/pid" 2>/dev/null || true)"
-      # 只有“年龄够大且持有者进程已不存在”才视为陈旧锁，避免误删活跃锁。
-      if [[ "$age" -gt 300 ]]; then
-        if [[ -z "$lock_pid" ]] || ! kill -0 "$lock_pid" 2>/dev/null; then
-          printf 'Removing stale lock (age %ss, pid %s): %s\n' "$age" "${lock_pid:-unknown}" "$lock_dir" >&2
-          rm -rf "$lock_dir" 2>/dev/null || true
-          continue
-        fi
-      fi
-    fi
-    sleep 0.2
-    waited=$(( waited + 1 ))
-    if [[ "$waited" -gt 50 ]]; then
-      printf 'Another writer holds the lock: %s\n' "$lock_dir" >&2
-      printf 'If no other process is running, remove it manually.\n' >&2
-      return 1
-    fi
-  done
-  printf '%s\n' "$$" > "$lock_dir/pid"
-  return 0
-}
-
-release_lock() {
-  rm -rf "$lock_dir" 2>/dev/null || true
-}
-
 if [[ "$use_lock" -eq 1 ]]; then
-  acquire_lock || exit 1
-  trap release_lock EXIT INT TERM
+  # 路径是运行时拼接的，shellcheck 无法静态解析；锁库随 skill 一起分发。
+  # shellcheck source=/dev/null
+  . "$SCRIPT_DIR/lib/lock.sh"
+  # 先装信号处理再抢锁：在等待锁的过程中被 TERM 也必须终止，而不是继续执行。
+  trap 'psr_lock_release "$root"' EXIT
+  trap 'psr_lock_release "$root"; exit 130' INT TERM HUP
+  psr_lock_acquire "$root" || exit 1
 fi
 
 # 序号允许超过三位：旧实现只认三位，到 1000 后会重新给出已存在的编号并覆盖文件。
