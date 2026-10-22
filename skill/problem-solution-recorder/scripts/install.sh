@@ -145,7 +145,7 @@ uninstall_one() {
 
   if [[ -L "$target" ]]; then
     local resolved_canonical=""
-    resolved_canonical="$(readlink -f "$target" 2>/dev/null || true)"
+    resolved_canonical="$(canonical_dir "$target" 2>/dev/null || true)"
     if [[ "$resolved_canonical" == "$skill_canonical" ]]; then
       if [[ "$DRY_RUN" -eq 1 ]]; then
         printf '[dry-run] would remove symlink %s\n' "$target"

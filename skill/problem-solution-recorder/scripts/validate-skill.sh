@@ -61,15 +61,17 @@ for file in "AI入口.md" "AI记录提示词.md" "AI工具记录规则.md" "INDE
 done
 
 # Scan only paths where private home dirs would be accidental; exclude agents/ (example tool paths).
-: > /tmp/problem-solution-recorder-private-paths.txt
+scan_dir="$(mktemp -d "${TMPDIR:-/tmp}/psr-validate.XXXXXX")"
+trap 'rm -rf "$scan_dir"' EXIT
+: > "$scan_dir/private-paths.txt"
 grep -R --line-number \
   --exclude='validate-skill.sh' \
   --exclude-dir='.git' \
   --exclude='.psr-installed-from' \
-  -E '/home/[A-Za-z0-9._-]+|/Users/[A-Za-z0-9._-]+' "$SKILL_DIR/references" "$SKILL_DIR/scripts" "$SKILL_DIR/assets" "$SKILL_DIR/SKILL.md" 2>/dev/null >> /tmp/problem-solution-recorder-private-paths.txt || true
-grep -vE 'SKILL\.md:.*github\.com' /tmp/problem-solution-recorder-private-paths.txt > /tmp/problem-solution-recorder-private-paths-filtered.txt || true
-if [[ -s /tmp/problem-solution-recorder-private-paths-filtered.txt ]]; then
-  cat /tmp/problem-solution-recorder-private-paths-filtered.txt >&2
+  -E '/home/[A-Za-z0-9._-]+|/Users/[A-Za-z0-9._-]+' "$SKILL_DIR/references" "$SKILL_DIR/scripts" "$SKILL_DIR/assets" "$SKILL_DIR/SKILL.md" 2>/dev/null >> "$scan_dir/private-paths.txt" || true
+grep -vE 'SKILL\.md:.*github\.com' "$scan_dir/private-paths.txt" > "$scan_dir/private-paths-filtered.txt" || true
+if [[ -s "$scan_dir/private-paths-filtered.txt" ]]; then
+  cat "$scan_dir/private-paths-filtered.txt" >&2
   fail "private absolute home paths found (scan: references, scripts, assets, SKILL.md)"
 fi
 
@@ -77,8 +79,8 @@ if grep -R --line-number \
   --exclude='validate-skill.sh' \
   --exclude-dir='.git' \
   --exclude='.psr-installed-from' \
-  -E '(real-secret-value|sk-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{10,})' "$SKILL_DIR" >/tmp/problem-solution-recorder-secret-patterns.txt; then
-  cat /tmp/problem-solution-recorder-secret-patterns.txt >&2
+  -E '(real-secret-value|sk-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{10,})' "$SKILL_DIR" >"$scan_dir/secret-patterns.txt"; then
+  cat "$scan_dir/secret-patterns.txt" >&2
   fail "potential secret pattern found"
 fi
 

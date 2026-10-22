@@ -18,6 +18,15 @@ check_file() {
   fi
 }
 
+check_optional_file() {
+  local path="$1"
+  if [[ -f "$root/$path" ]]; then
+    printf '[ok] %s\n' "$path"
+  else
+    printf '[warn] %s (optional)\n' "$path"
+  fi
+}
+
 check_dir() {
   local path="$1"
   if [[ -d "$root/$path" ]]; then
@@ -35,8 +44,8 @@ check_file "AI工具记录规则.md"
 check_file "INDEX.md"
 check_file "AI_SUMMARY_INDEX.md"
 check_file "_templates/问题记录模板.md"
-check_file "_templates/日报复盘模板.md"
-check_file "_templates/周报复盘模板.md"
+check_optional_file "_templates/日报复盘模板.md"
+check_optional_file "_templates/周报复盘模板.md"
 check_dir "records"
 check_dir "patterns"
 check_dir "reviews"
