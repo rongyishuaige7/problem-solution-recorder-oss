@@ -81,6 +81,12 @@ cmd_configure() {
 
   case "$scope" in
     show)
+      if [[ -n "$LOCAL_KB" ]]; then
+        printf '知识库: %s\n' "$LOCAL_KB"
+        printf '来源: 知识库内置副本（bin/psr）\n'
+        printf '记录数: %s\n' "$(find "$LOCAL_KB/records" -type f -name '*.md' 2>/dev/null | wc -l | tr -d ' ')"
+        return 0
+      fi
       local out root source
       if ! out="$("$SCRIPTS/resolve-kb-root.sh" --explain 2>/dev/null)"; then
         printf '知识库: 未配置\n'
@@ -163,6 +169,11 @@ cmd_doctor() {
   "$SCRIPTS/doctor-local.sh" "$root" || status=$?
 
   printf '\n安装与发现:\n'
+  if [[ -n "$LOCAL_KB" ]]; then
+    printf '[info] 本副本位于知识库内（%s），安装诊断请运行 skill 目录的 scripts/install.sh\n' "$LOCAL_KB"
+    printf '[unknown] 无法验证各工具是否实际加载了 skill；需在对应工具内触发一次\n'
+    return "$status"
+  fi
   local dir target resolved
   for dir in "$HOME/.agents/skills" "$HOME/.codex/skills" "$HOME/.claude/skills" "$HOME/.cursor/skills-cursor" "$HOME/.openclaw/skills"; do
     target="$dir/problem-solution-recorder"
