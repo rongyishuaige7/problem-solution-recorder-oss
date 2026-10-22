@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$( ( unset CDPATH; cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd -P ) )"
 RESOLVE="$SCRIPT_DIR/resolve-kb-root.sh"
 CHECK_KB="$SCRIPT_DIR/check-kb.sh"
+PARSER="$SCRIPT_DIR/lib/record-fields.awk"
 
 root="$("$RESOLVE" "${1:-}")"
 
@@ -53,17 +54,51 @@ check_dir "records"
 check_dir "patterns"
 check_dir "reviews"
 
-# ---- 一致性检查：索引与记录必须互相对得上 ----
+tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/psr-doctor.XXXXXX")"
+trap 'rm -rf "$tmp_dir"' EXIT
 
-records_found=0
+records_file="$tmp_dir/records.tsv"
+: > "$records_file"
+
+rec_files=()
 if [[ -d "$root/records" ]]; then
-  records_found="$(find "$root/records" -type f -name '*.md' | wc -l | tr -d ' ')"
+  while IFS= read -r f; do
+    rec_files+=("$f")
+  done < <(find "$root/records" -type f -name '*.md' | sort)
 fi
+
+records_found="${#rec_files[@]}"
 printf '[info] records: %s\n' "$records_found"
 
 if [[ "$records_found" -gt 0 ]]; then
-  # 1) 重复 ID
-  dup_ids="$(find "$root/records" -type f -name '*.md' | sed -E 's|.*/||' | grep -oE '^[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{3}' | sort | uniq -d || true)"
+  if [[ -f "$PARSER" ]]; then
+    LC_ALL=C awk -v root="$root" -v maxlines=0 -f "$PARSER" "${rec_files[@]}" > "$tmp_dir/stream" 2>/dev/null || true
+    cur_rel=""
+    cur_id=""
+    cur_status=""
+    emit_record_row() {
+      [[ -n "$cur_rel" ]] || return 0
+      printf '%s\037%s\037%s\n' "${cur_id:-$cur_rel}" "$cur_rel" "${cur_status:-unknown}" >> "$records_file"
+    }
+    while IFS=$'\t' read -r tag field value; do
+      case "$tag" in
+        '@R') emit_record_row; cur_rel="$field"; cur_id=""; cur_status="" ;;
+        '@F')
+          case "$field" in
+            id) cur_id="$value" ;;
+            status) cur_status="$value" ;;
+          esac
+          ;;
+      esac
+    done < "$tmp_dir/stream"
+    emit_record_row
+  else
+    printf '[warn] record parser missing: %s\n' "$PARSER"
+    warnings=$((warnings + 1))
+  fi
+
+  # 1) 重复 ID（完整比较，不再截断到三位序号）
+  dup_ids="$(cut -f1 "$records_file" | sort | uniq -d || true)"
   if [[ -n "$dup_ids" ]]; then
     printf '[fail] duplicate record IDs:\n'
     printf '%s\n' "$dup_ids" | sed 's/^/  - /'
@@ -71,21 +106,33 @@ if [[ "$records_found" -gt 0 ]]; then
   else
     printf '[ok] record IDs are unique\n'
   fi
+fi
 
-  # 2) 索引断链
-  index_path="$root/INDEX.md"
-  if [[ -f "$index_path" ]]; then
-    broken="$(grep -oE '\]\([^)]+\.md\)' "$index_path" 2>/dev/null | sed -E 's/^\]\((.*)\)$/\1/' | while IFS= read -r rel; do
-      [[ -f "$root/$rel" ]] || printf '%s\n' "$rel"
-    done || true)"
-    if [[ -n "$broken" ]]; then
-      printf '[fail] INDEX.md links to missing records:\n'
-      printf '%s\n' "$broken" | sed 's/^/  - /'
-      failures=$((failures + 1))
-    else
-      printf '[ok] INDEX.md links resolve\n'
-    fi
+index_path="$root/INDEX.md"
+if [[ -f "$index_path" ]]; then
+  # 2) 索引断链：即使 records/ 为空也要检查（索引可能指向已删除的记录）
+  broken="$(awk '
+    {
+      row = $0
+      gsub(/\\\|/, "\001", row)
+      if (row !~ /^\|/) next
+      while (match(row, /\]\(([^)]+\.md)\)/)) {
+        print substr(row, RSTART + 2, RLENGTH - 3)
+        row = substr(row, RSTART + RLENGTH)
+      }
+    }
+  ' "$index_path" | while IFS= read -r rel; do
+    [[ -f "$root/$rel" ]] || printf '%s\n' "$rel"
+  done || true)"
+  if [[ -n "$broken" ]]; then
+    printf '[fail] INDEX.md links to missing records:\n'
+    printf '%s\n' "$broken" | sed 's/^/  - /'
+    failures=$((failures + 1))
+  else
+    printf '[ok] INDEX.md links resolve\n'
+  fi
 
+  if [[ "$records_found" -gt 0 ]]; then
     # 3) 记录未入索引
     missing_rows=""
     while IFS= read -r file; do
@@ -103,23 +150,30 @@ if [[ "$records_found" -gt 0 ]]; then
       printf '[ok] every record has an INDEX.md row\n'
     fi
 
-    # 4) 状态不一致（只比对英文枚举；中文状态视为人工描述，跳过）
-    mismatches="$(awk -F'|' -v root="$root" '
-      function trim(s) { gsub(/^[[:space:]]+|[[:space:]]+$/, "", s); return s }
-      /^\|[[:space:]]*ID[[:space:]]*\|/ { schema = 7 }
-      /^\|[[:space:]]*Date[[:space:]]*\|/ { schema = 6 }
-      /^\|[[:space:]]*[0-9]{4}-[0-9]{2}-[0-9]{2}/ {
-        for (i = 1; i <= NF; i++) $i = trim($i)
-        if (schema == 7) { status = $6; link = $8 } else { status = $4; link = $7 }
-        if (status !~ /^(draft|solved|workaround|investigating|unresolved)$/) next
+    # 4) 状态不一致：转义竖线先替换成哨兵，避免表格列错位
+    mismatches="$(awk -v recs="$records_file" '
+      BEGIN {
+        while ((getline line < recs) > 0) {
+          n = split(line, p, "\037")
+          status[p[2]] = p[3]
+        }
+        close(recs)
+      }
+      {
+        row = $0
+        gsub(/\\\|/, "\001", row)
+        if (row ~ /^\|[[:space:]]*ID[[:space:]]*\|/) { schema = 7; next }
+        if (row ~ /^\|[[:space:]]*Date[[:space:]]*\|/) { schema = 6; next }
+        if (row !~ /^\|[[:space:]]*[0-9]{4}-[0-9]{2}-[0-9]{2}/) next
+        n = split(row, f, "|")
+        if (schema == 7) { row_status = f[6]; link = f[8] } else { row_status = f[4]; link = f[7] }
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", row_status)
+        if (row_status !~ /^(draft|solved|workaround|investigating|unresolved)$/) next
         if (!match(link, /\(([^)]+)\)/)) next
         rel = substr(link, RSTART + 1, RLENGTH - 2)
-        cmd = "grep -m1 \"^status:\" \"" root "/" rel "\" 2>/dev/null"
-        cmd | getline line
-        close(cmd)
-        sub(/^status:[[:space:]]*/, "", line)
-        gsub(/^"|"$/, "", line)
-        if (line != "" && line != status) printf "  - %s: INDEX=%s record=%s\n", rel, status, line
+        if (rel in status && status[rel] != row_status) {
+          printf "  - %s: INDEX=%s record=%s\n", rel, row_status, status[rel]
+        }
       }
     ' "$index_path" 2>/dev/null || true)"
     if [[ -n "$mismatches" ]]; then
@@ -129,30 +183,26 @@ if [[ "$records_found" -gt 0 ]]; then
     else
       printf '[ok] INDEX.md status matches records\n'
     fi
-  fi
 
-  # 5) 仍是占位内容的记录
-  rec_files=()
-  while IFS= read -r f; do
-    rec_files+=("$f")
-  done < <(find "$root/records" -type f -name '*.md' | sort)
-  placeholders="$(LC_ALL=C awk '
-    FNR == 1 { section = 0 }
-    /^##[[:space:]]+一句话结论/ { section = 1; empty = 1; next }
-    section && /^##[[:space:]]/ { if (empty) print FILENAME; section = 0 }
-    section {
-      line = $0
-      gsub(/^[[:space:]-]+/, "", line)
-      if (line != "" && line != "待填写。" && line !~ /^用 1 到 3 句话/) empty = 0
-    }
-    END { if (section && empty) print FILENAME }
-  ' ${rec_files[@]+"${rec_files[@]}"} 2>/dev/null || true)"
-  if [[ -n "$placeholders" ]]; then
-    printf '[warn] records still have a placeholder conclusion:\n'
-    printf '%s\n' "$placeholders" | sed "s|$root/||; s/^/  - /"
-    warnings=$((warnings + 1))
-  else
-    printf '[ok] no placeholder conclusions\n'
+    # 5) 仍是占位内容的记录
+    placeholders="$(LC_ALL=C awk '
+      FNR == 1 { section = 0 }
+      /^##[[:space:]]+一句话结论/ { section = 1; empty = 1; next }
+      section && /^##[[:space:]]/ { if (empty) print FILENAME; section = 0 }
+      section {
+        line = $0
+        gsub(/^[[:space:]-]+/, "", line)
+        if (line != "" && line != "待填写。" && line !~ /^用 1 到 3 句话/) empty = 0
+      }
+      END { if (section && empty) print FILENAME }
+    ' ${rec_files[@]+"${rec_files[@]}"} 2>/dev/null || true)"
+    if [[ -n "$placeholders" ]]; then
+      printf '[warn] records still have a placeholder conclusion:\n'
+      printf '%s\n' "$placeholders" | sed "s|$root/||; s/^/  - /"
+      warnings=$((warnings + 1))
+    else
+      printf '[ok] no placeholder conclusions\n'
+    fi
   fi
 fi
 

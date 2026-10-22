@@ -246,4 +246,87 @@ pass "密钥扫描：路径/同行情景不漏报，错误码与脱敏正确"
 [[ -e "$tmp/install-target" ]] && fail "install.sh --dry-run created the target directory"
 pass "install --dry-run 不写文件系统"
 
+# ---------------------------------------------------------------- 摘要读取失败不得覆盖索引
+kb_unread="$tmp/kb-unread"
+"$INIT" "$kb_unread" >/dev/null
+"$NEW" "Readable" --root "$kb_unread" --date 2099-09-09 >/dev/null
+"$SUMMARY" "$kb_unread" >/dev/null
+cp "$kb_unread/AI_SUMMARY_INDEX.md" "$tmp/summary-before"
+printf 'X=1\n' > "$kb_unread/records/2099/2099-09-10-001-locked.md"
+chmod 000 "$kb_unread/records/2099/2099-09-10-001-locked.md"
+set +e
+"$SUMMARY" "$kb_unread" >/dev/null 2>&1
+unread_rc=$?
+set -e
+chmod 644 "$kb_unread/records/2099/2099-09-10-001-locked.md"
+[[ "$unread_rc" -ne 0 ]] || fail "summary index reported success with an unreadable record"
+cmp -s "$tmp/summary-before" "$kb_unread/AI_SUMMARY_INDEX.md" || fail "summary index was overwritten despite a read failure"
+pass "不可读记录时摘要索引报错且不覆盖"
+
+# ---------------------------------------------------------------- 信号终止写入
+kb_sig="$tmp/kb-signal"
+"$INIT" "$kb_sig" >/dev/null
+mkdir "$kb_sig/.psr.lock"
+printf '999999\n' > "$kb_sig/.psr.lock/pid"
+mkdir "$tmp/fakebin"
+cat > "$tmp/fakebin/sleep" <<'FAKE_SLEEP'
+#!/usr/bin/env bash
+kill -TERM "$PPID" 2>/dev/null
+exit 0
+FAKE_SLEEP
+chmod +x "$tmp/fakebin/sleep"
+set +e
+PATH="$tmp/fakebin:$PATH" "$NEW" "Signal test" --root "$kb_sig" --date 2099-10-10 >/dev/null 2>&1
+sig_rc=$?
+set -e
+[[ "$sig_rc" -eq 130 ]] || fail "SIGTERM during lock wait exited $sig_rc (expected 130)"
+[[ -z "$(find "$kb_sig/records" -name '2099-10-10-*' 2>/dev/null)" ]] || fail "record was created after SIGTERM"
+[[ -d "$kb_sig/.psr.lock" ]] || fail "signal handler removed another process's lock"
+pass "SIGTERM 终止写入并保留他人锁"
+
+# ---------------------------------------------------------------- 共享锁：重建索引遵守同一把锁
+kb_shared="$tmp/kb-shared"
+"$INIT" "$kb_shared" >/dev/null
+"$NEW" "Shared lock" --root "$kb_shared" --date 2099-11-11 >/dev/null
+mkdir "$kb_shared/.psr.lock"
+printf '999999\n' > "$kb_shared/.psr.lock/pid"
+set +e
+PSR_LOCK_RETRIES=1 "$REBUILD" "$kb_shared" --check >/dev/null 2>&1
+shared_rc=$?
+set -e
+rm -rf "$kb_shared/.psr.lock"
+[[ "$shared_rc" -ne 0 ]] || fail "rebuild-index.sh ignored the knowledge base write lock"
+pass "rebuild-index 使用同一把 .psr.lock"
+
+# ---------------------------------------------------------------- doctor：编号、空库、转义竖线
+kb_doc2="$tmp/kb-doctor2"
+"$INIT" "$kb_doc2" >/dev/null
+mkdir -p "$kb_doc2/records/2099"
+: > "$kb_doc2/records/2099/2099-01-01-1000-a.md"
+: > "$kb_doc2/records/2099/2099-01-01-1001-b.md"
+"$DOCTOR" "$kb_doc2" 2>&1 | grep -Fq "duplicate record IDs" && fail "doctor reported 1000/1001 as duplicate IDs"
+
+kb_empty="$tmp/kb-empty"
+"$INIT" "$kb_empty" >/dev/null
+rm -rf "$kb_empty/records"
+mkdir -p "$kb_empty/records"
+printf '# Index\n\n| Date | Title | Status | Tools | Tags | Record |\n| --- | --- | --- | --- | --- | --- |\n| 2026-01-01 | gone | solved | - | - | [x](records/2026/gone.md) |\n' > "$kb_empty/INDEX.md"
+if "$DOCTOR" "$kb_empty" >/dev/null 2>&1; then
+  fail "doctor missed a broken INDEX.md link when records/ was empty"
+fi
+
+kb_pipe="$tmp/kb-pipe"
+"$INIT" "$kb_pipe" >/dev/null
+"$NEW" "Pipe | title" --root "$kb_pipe" --date 2099-12-12 >/dev/null
+sed -i.bak 's/^status: draft/status: solved/' "$kb_pipe"/records/2099/2099-12-12-001-pipe-title.md
+rm -f "$kb_pipe"/records/2099/*.bak
+doctor_pipe_out="$("$DOCTOR" "$kb_pipe" 2>&1 || true)"
+if ! printf '%s' "$doctor_pipe_out" | grep -Fq "status differs"; then
+  printf '%s\n' "$doctor_pipe_out" >&2
+  printf 'INDEX row: %s\n' "$(grep '2099-12-12' "$kb_pipe/INDEX.md" || true)" >&2
+  printf 'Record status: %s\n' "$(grep -m1 '^status:' "$kb_pipe"/records/2099/*.md || true)" >&2
+  fail "doctor missed status drift on a title containing an escaped pipe"
+fi
+pass "doctor 处理 1000/1001、空库断链与转义竖线"
+
 printf '[ok] smoke test passed\n'
