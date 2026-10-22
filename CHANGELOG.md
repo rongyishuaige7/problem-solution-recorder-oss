@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Secret scanner false positives on `task-...` filenames (`sk-` rule), `/cross-session:` slash commands, and local `session_id` values.
 - `validate-skill.sh` no longer writes fixed paths under `/tmp` (concurrent runs clobbered each other).
 - `install.sh --uninstall` no longer depends on GNU `readlink -f`.
+- `update-ai-summary-index.sh` renders inline YAML arrays (`["codex", "mcp"]`) as plain `codex, mcp` lists.
 
 
 ## [0.2.0] - 2026-07-14

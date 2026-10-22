@@ -33,6 +33,10 @@ heading_title() {
   awk '/^# / { sub(/^# /, ""); print; exit }' "$1"
 }
 
+yaml_list_text() {
+  printf '%s' "$1" | sed -E 's/^\[//; s/\]$//; s/"[[:space:]]*,[[:space:]]*"/, /g; s/"//g'
+}
+
 section_text() {
   local file="$1"
   local section="$2"
@@ -59,8 +63,8 @@ section_text() {
       date_value="$(front_value "$file" date)"
       title_value="$(front_value "$file" title)"
       status_value="$(front_value "$file" status)"
-      tools_value="$(front_value "$file" tools)"
-      tags_value="$(front_value "$file" tags)"
+      tools_value="$(yaml_list_text "$(front_value "$file" tools)")"
+      tags_value="$(yaml_list_text "$(front_value "$file" tags)")"
 
       [[ -n "$date_value" ]] || date_value="$(basename "$file" | cut -d- -f1-3)"
       [[ -n "$title_value" ]] || title_value="$(heading_title "$file")"
