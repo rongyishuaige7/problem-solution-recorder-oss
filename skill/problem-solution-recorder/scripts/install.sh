@@ -11,6 +11,8 @@ TARGETS=()
 ACTION="install"
 DRY_RUN=0
 SKIP_VALIDATE=0
+UPGRADE=0
+CUSTOM_DIR=""
 
 usage() {
   cat <<'EOF'
@@ -19,7 +21,10 @@ Install or uninstall problem-solution-recorder into local AI skill directories.
 Usage:
   install.sh [--copy|--symlink] [--codex] [--claude] [--cursor] [--agents] [--openclaw] [--all]
   install.sh --uninstall [--codex] ... [--all]
-  install.sh [--dry-run] [--skip-validate]
+  install.sh [--dry-run] [--skip-validate] [--upgrade] [--dir /custom/target]
+
+  --upgrade   Refresh an existing install that was created by this script.
+  --dir PATH  Install into PATH instead of a known tool directory.
 
 Default install:
   --copy --all
@@ -57,6 +62,9 @@ while [[ $# -gt 0 ]]; do
     --uninstall) ACTION="uninstall" ;;
     --dry-run) DRY_RUN=1 ;;
     --skip-validate) SKIP_VALIDATE=1 ;;
+    --upgrade) UPGRADE=1 ;;
+    --dir) CUSTOM_DIR="${2:-}"; shift ;;
+    --dir=*) CUSTOM_DIR="${1#--dir=}" ;;
     -h|--help) usage; exit 0 ;;
     *) printf 'Unknown option: %s\n' "$1" >&2; usage >&2; exit 2 ;;
   esac
@@ -65,6 +73,11 @@ done
 
 if [[ "${#TARGETS[@]}" -eq 0 ]]; then
   TARGETS=("codex" "claude" "cursor" "agents" "openclaw")
+fi
+
+# --dir 只装一个目标，避免同一个目录被多个默认目标重复处理。
+if [[ -n "$CUSTOM_DIR" ]]; then
+  TARGETS=("custom")
 fi
 
 target_dir_for() {
@@ -101,18 +114,55 @@ copy_skill() {
 
 install_one() {
   local target_name="$1"
-  local target
-  target="$(target_dir_for "$target_name")"
-  mkdir -p "$(dirname "$target")"
+  local target marker stored stored_canonical
+  if [[ -n "$CUSTOM_DIR" ]]; then
+    target="$CUSTOM_DIR"
+  else
+    target="$(target_dir_for "$target_name")"
+  fi
+
+  if [[ "$DRY_RUN" -eq 0 ]]; then
+    mkdir -p "$(dirname "$target")"
+  fi
 
   if [[ -L "$target" ]]; then
-    if [[ "$DRY_RUN" -eq 1 ]]; then
-      printf '[dry-run] would remove existing symlink: %s\n' "$target"
-    else
-      rm "$target"
+    local link_target
+    link_target="$(canonical_dir "$target" 2>/dev/null || true)"
+    if [[ "$link_target" == "$skill_canonical" ]]; then
+      if [[ "$DRY_RUN" -eq 1 ]]; then
+        printf '[dry-run] would refresh symlink: %s\n' "$target"
+      else
+        rm "$target"
+        ln -s "$SKILL_DIR" "$target"
+        printf '[link] %s -> %s (refreshed)\n' "$target" "$SKILL_DIR"
+      fi
+      return 0
     fi
+    printf '[skip] symlink does not point at this skill: %s\n' "$target"
+    return 0
   elif [[ -e "$target" ]]; then
-    printf '[skip] %s exists and is not a symlink; move it manually if you want to replace it\n' "$target"
+    marker="$target/.psr-installed-from"
+    if [[ -f "$marker" ]]; then
+      stored="$(sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' "$marker" | sed -n '1p')"
+      if [[ -n "$stored" && -d "$stored" ]]; then
+        stored_canonical="$(canonical_dir "$stored" 2>/dev/null || true)"
+      fi
+    fi
+    if [[ "${stored_canonical:-}" == "$skill_canonical" ]]; then
+      if [[ "$UPGRADE" -eq 1 ]]; then
+        if [[ "$DRY_RUN" -eq 1 ]]; then
+          printf '[dry-run] would refresh install: %s\n' "$target"
+        else
+          rm -rf "$target"
+          copy_skill "$target"
+          printf '[copy] %s -> %s (upgraded)\n' "$SKILL_DIR" "$target"
+        fi
+        return 0
+      fi
+      printf '[skip] %s already installed from this skill; use --upgrade to refresh\n' "$target"
+      return 0
+    fi
+    printf '[skip] %s exists and was not installed by this script\n' "$target"
     return 0
   fi
 
@@ -136,7 +186,11 @@ install_one() {
 uninstall_one() {
   local target_name="$1"
   local target
-  target="$(target_dir_for "$target_name")"
+  if [[ -n "$CUSTOM_DIR" ]]; then
+    target="$CUSTOM_DIR"
+  else
+    target="$(target_dir_for "$target_name")"
+  fi
 
   if [[ ! -e "$target" && ! -L "$target" ]]; then
     printf '[skip] not installed: %s\n' "$target"
