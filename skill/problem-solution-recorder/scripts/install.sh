@@ -13,6 +13,8 @@ DRY_RUN=0
 SKIP_VALIDATE=0
 UPGRADE=0
 CUSTOM_DIR=""
+BIN_INSTALL=0
+BIN_DIR=""
 
 usage() {
   cat <<'EOF'
@@ -22,6 +24,7 @@ Usage:
   install.sh [--copy|--symlink] [--codex] [--claude] [--cursor] [--agents] [--openclaw] [--all]
   install.sh --uninstall [--codex] ... [--all]
   install.sh [--dry-run] [--skip-validate] [--upgrade] [--dir /custom/target]
+  install.sh --bin [--bin-dir DIR]  Link bin/psr into ~/.local/bin (or DIR)
 
   --upgrade   Refresh an existing install that was created by this script.
   --dir PATH  Install into PATH instead of a known tool directory.
@@ -65,6 +68,8 @@ while [[ $# -gt 0 ]]; do
     --upgrade) UPGRADE=1 ;;
     --dir) CUSTOM_DIR="${2:-}"; shift ;;
     --dir=*) CUSTOM_DIR="${1#--dir=}" ;;
+    --bin) BIN_INSTALL=1 ;;
+    --bin-dir) BIN_DIR="${2:-}"; shift ;;
     -h|--help) usage; exit 0 ;;
     *) printf 'Unknown option: %s\n' "$1" >&2; usage >&2; exit 2 ;;
   esac
@@ -242,6 +247,47 @@ uninstall_one() {
 
   printf '[skip] unexpected install target type: %s\n' "$target"
 }
+
+install_bin() {
+  local dir="${BIN_DIR:-$HOME/.local/bin}"
+  local target="$dir/psr"
+  local source="$SKILL_DIR/bin/psr"
+
+  [[ -f "$source" ]] || {
+    printf '[fail] missing %s\n' "$source" >&2
+    return 1
+  }
+
+  if [[ -e "$target" || -L "$target" ]]; then
+    if [[ -L "$target" ]]; then
+      local current
+      current="$(readlink "$target" 2>/dev/null || true)"
+      if [[ "$current" == "$source" ]]; then
+        if [[ "$DRY_RUN" -eq 1 ]]; then
+          printf '[dry-run] psr already linked: %s\n' "$target"
+        else
+          printf '[ok] psr already linked: %s\n' "$target"
+        fi
+        return 0
+      fi
+    fi
+    printf '[skip] %s exists and is not this skill''s psr; move it manually\n' "$target"
+    return 1
+  fi
+
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    printf '[dry-run] would link %s -> %s\n' "$target" "$source"
+    return 0
+  fi
+
+  mkdir -p "$dir"
+  ln -s "$source" "$target"
+  printf '[link] %s -> %s\n' "$target" "$source"
+}
+
+if [[ "$BIN_INSTALL" -eq 1 ]]; then
+  install_bin || exit 1
+fi
 
 if [[ "$ACTION" == "uninstall" ]]; then
   for target in "${TARGETS[@]}"; do

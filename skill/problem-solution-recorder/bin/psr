@@ -1,0 +1,480 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SELF="$( ( unset CDPATH; cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd -P ) )"
+SKILL_DIR="$( ( unset CDPATH; cd -P -- "$SELF/.." >/dev/null 2>&1 && pwd -P ) )"
+SCRIPTS="$SKILL_DIR/scripts"
+LIB="$SCRIPTS/lib"
+
+# 知识库内的副本（<kb>/bin/psr）默认管理它所在的知识库。
+LOCAL_KB=""
+if [[ -f "$SKILL_DIR/AI入口.md" && -f "$SKILL_DIR/INDEX.md" ]]; then
+  LOCAL_KB="$SKILL_DIR"
+fi
+
+die() {
+  printf 'psr: %s\n' "$*" >&2
+  exit 1
+}
+
+usage() {
+  cat <<'EOF'
+psr - problem-solution recorder CLI
+
+Usage:
+  psr configure --global <kb>          Save the knowledge base globally (XDG config)
+  psr configure --project [kb] [--dir D]
+                                       Write .problem-solution-root (default: cwd)
+  psr configure --show                 Show the resolved knowledge base and its source
+  psr init <kb> [--with-examples] [--force] [--dry-run]
+                                       Create an empty knowledge base (examples optional)
+  psr doctor                           Check the knowledge base and installation state
+  psr new "Title" [--mode quick|full] [--date YYYY-MM-DD] [--tools a,b] [--tags a,b] [--slug s]
+                                       Create a record (quick = 快记 template)
+  psr finalize <id> --status solved|workaround|unresolved [--dry-run]
+                                       Validate, set the machine status, sync both indexes
+  psr --version
+
+Legacy commands (scripts/qs in a knowledge base) keep working; both use the same
+parser, lock, and index rules under scripts/lib/.
+EOF
+}
+
+kb_root() {
+  if [[ -n "$LOCAL_KB" ]]; then
+    printf '%s\n' "$LOCAL_KB"
+    return 0
+  fi
+  "$SCRIPTS/resolve-kb-root.sh"
+}
+
+require_root() {
+  local root
+  if ! root="$(kb_root)"; then
+    die "未找到知识库。先运行: psr configure --global /path/to/kb（或 psr init /path/to/kb）"
+  fi
+  printf '%s\n' "$root"
+}
+
+# ---------------------------------------------------------------- configure
+cmd_configure() {
+  local scope=""
+  local kb=""
+  local dir="$PWD"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --global) scope="global"; shift ;;
+      --project) scope="project"; shift ;;
+      --show) scope="show"; shift ;;
+      --dir) dir="${2:-}"; shift 2 ;;
+      -h|--help) usage; exit 0 ;;
+      *)
+        if [[ -z "$kb" ]]; then
+          kb="$1"; shift
+        else
+          die "多余的参数: $1"
+        fi
+        ;;
+    esac
+  done
+
+  case "$scope" in
+    show)
+      local out root source
+      if ! out="$("$SCRIPTS/resolve-kb-root.sh" --explain 2>/dev/null)"; then
+        printf '知识库: 未配置\n'
+        printf '提示: psr configure --global /path/to/kb 或 psr configure --project /path/to/kb\n'
+        return 0
+      fi
+      root="${out%%	*}"
+      source="${out#*	}"
+      printf '知识库: %s\n' "$root"
+      case "$source" in
+        env) printf '来源: 环境变量 PROBLEM_SOLUTION_KB_ROOT\n' ;;
+        marker:*) printf '来源: 项目标记 %s\n' "${source#marker:}" ;;
+        xdg:*) printf '来源: 全局配置 %s\n' "${source#xdg:}" ;;
+        arg) printf '来源: 命令行参数\n' ;;
+        *) printf '来源: %s\n' "$source" ;;
+      esac
+      printf '记录数: %s\n' "$(find "$root/records" -type f -name '*.md' 2>/dev/null | wc -l | tr -d ' ')"
+      return 0
+      ;;
+    global)
+      [[ -n "$kb" ]] || die "用法: psr configure --global /path/to/kb"
+      local resolved
+      resolved="$("$SCRIPTS/resolve-kb-root.sh" "$kb")" || die "不是有效的知识库（缺少 AI入口.md）: $kb"
+      local config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
+      mkdir -p "$config_home/problem-solution-recorder"
+      printf '%s\n' "$resolved" > "$config_home/problem-solution-recorder/root"
+      printf '已配置全局知识库: %s\n' "$resolved"
+      printf '配置文件: %s\n' "$config_home/problem-solution-recorder/root"
+      return 0
+      ;;
+    project)
+      [[ -n "$kb" ]] || die "用法: psr configure --project [--dir D] /path/to/kb"
+      local resolved
+      resolved="$("$SCRIPTS/resolve-kb-root.sh" "$kb")" || die "不是有效的知识库（缺少 AI入口.md）: $kb"
+      [[ -d "$dir" ]] || die "目录不存在: $dir"
+      printf '%s\n' "$resolved" > "$dir/.problem-solution-root"
+      printf '已配置项目标记: %s\n' "$dir/.problem-solution-root"
+      printf '知识库: %s\n' "$resolved"
+      return 0
+      ;;
+    *)
+      usage >&2
+      exit 2
+      ;;
+  esac
+}
+
+# ---------------------------------------------------------------- init
+cmd_init() {
+  local target=""
+  local args=()
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --with-examples|--force|--dry-run) args+=("$1"); shift ;;
+      -h|--help) usage; exit 0 ;;
+      *)
+        if [[ -z "$target" ]]; then
+          target="$1"; shift
+        else
+          die "多余的参数: $1"
+        fi
+        ;;
+    esac
+  done
+
+  [[ -n "$target" ]] || die "用法: psr init /path/to/kb [--with-examples]"
+  "$SCRIPTS/init-kb.sh" "$target" ${args[@]+"${args[@]}"}
+  printf '下一步:\n'
+  printf '  psr configure --global %s\n' "$target"
+  printf '  psr new "第一个问题" --mode quick\n'
+}
+
+# ---------------------------------------------------------------- doctor
+cmd_doctor() {
+  local root
+  root="$(require_root)"
+
+  local status=0
+  "$SCRIPTS/doctor-local.sh" "$root" || status=$?
+
+  printf '\n安装与发现:\n'
+  local dir target resolved
+  for dir in "$HOME/.agents/skills" "$HOME/.codex/skills" "$HOME/.claude/skills" "$HOME/.cursor/skills-cursor" "$HOME/.openclaw/skills"; do
+    target="$dir/problem-solution-recorder"
+    if [[ -L "$target" ]]; then
+      resolved="$( ( unset CDPATH; cd -P -- "$target" >/dev/null 2>&1 && pwd -P ) )" || resolved=""
+      if [[ "$resolved" == "$SKILL_DIR" ]]; then
+        printf '[installed] %s -> %s\n' "$target" "$SKILL_DIR"
+      else
+        printf '[different] %s -> %s（不是当前 skill）\n' "$target" "${resolved:-?}"
+      fi
+    elif [[ -d "$target" ]]; then
+      printf '[installed] %s（复制安装）\n' "$target"
+    else
+      printf '[absent] %s\n' "$target"
+    fi
+  done
+
+  if command -v psr >/dev/null 2>&1; then
+    printf '[ok] psr 在 PATH 中: %s\n' "$(command -v psr)"
+  else
+    printf '[warn] psr 不在 PATH 中；可运行 scripts/install.sh --bin\n'
+  fi
+  printf '[unknown] 无法验证各工具是否实际加载了 skill；需在对应工具内触发一次\n'
+
+  return "$status"
+}
+
+# ---------------------------------------------------------------- new
+cmd_new() {
+  local title=""
+  local mode="full"
+  local date_arg=""
+  local tools=""
+  local tags=""
+  local slug=""
+  local args=()
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --mode) mode="${2:-}"; shift 2 ;;
+      --date) date_arg="${2:-}"; shift 2 ;;
+      --tools) tools="${2:-}"; shift 2 ;;
+      --tags) tags="${2:-}"; shift 2 ;;
+      --slug) slug="${2:-}"; shift 2 ;;
+      -h|--help) usage; exit 0 ;;
+      *)
+        if [[ -z "$title" ]]; then
+          title="$1"; shift
+        else
+          die "多余的参数: $1"
+        fi
+        ;;
+    esac
+  done
+
+  [[ -n "$title" ]] || die "用法: psr new \"标题\" [--mode quick|full]"
+  case "$mode" in
+    quick|full) ;;
+    *) die "--mode 只支持 quick 或 full: $mode" ;;
+  esac
+
+  local root
+  root="$(require_root)"
+
+  local template=""
+  if [[ "$mode" == "quick" ]]; then
+    template="$root/_templates/快记模板.md"
+    [[ -f "$template" ]] || die "缺少快记模板: $template"
+  fi
+
+  args=("$title" --root "$root")
+  [[ -n "$date_arg" ]] && args+=(--date "$date_arg")
+  [[ -n "$tools" ]] && args+=(--tools "$tools")
+  [[ -n "$tags" ]] && args+=(--tags "$tags")
+  [[ -n "$slug" ]] && args+=(--slug "$slug")
+  [[ -n "$template" ]] && args+=(--template "$template")
+
+  local path id
+  path="$("$SCRIPTS/new-record.sh" "${args[@]}")" || die "创建记录失败"
+  id="$(basename "$path" | cut -c1-14)"
+
+  printf '知识库: %s\n' "$root"
+  printf '已创建: %s\n' "${path#"$root"/}"
+  printf 'ID: %s\n' "$id"
+  printf '下一步: 补全内容后运行 psr finalize %s --status solved\n' "$id"
+}
+
+# ---------------------------------------------------------------- finalize
+section_has_content() {
+  local file="$1"
+  local heading="$2"
+  LC_ALL=C awk -v h="$heading" '
+    $0 == "## " h { s = 1; next }
+    s && /^## / { exit }
+    s {
+      line = $0
+      gsub(/^[[:space:]*-]+/, "", line)
+      gsub(/[[:space:]]+$/, "", line)
+      if (line == "") next
+      if (line == "待填写" || line == "待填写。") next
+      if (line ~ /^\[[ xX]\]$/) next
+      if (line ~ /^用 1 到 3 句话/) next
+      if (line ~ /^写清楚最终改了什么/) next
+      if (line ~ /^用户看到的现象/) next
+      if (line ~ /^下次看到类似现象/) next
+      if (line ~ /^后续让 AI 总结/) next
+      found = 1
+      exit
+    }
+    END { exit(found ? 0 : 1) }
+  ' "$file"
+}
+
+record_status() {
+  local file="$1"
+  LC_ALL=C awk '
+    NR == 1 && $0 == "---" { fm = 1; next }
+    fm && $0 == "---" { exit }
+    fm && /^status:/ { sub(/^status:[[:space:]]*/, ""); gsub(/^"|"$/, ""); print; exit }
+  ' "$file"
+}
+
+set_record_status() {
+  local file="$1"
+  local status="$2"
+  local tmp
+  tmp="$(mktemp "${TMPDIR:-/tmp}/psr-status.XXXXXX")"
+  awk -v st="$status" '
+    BEGIN { fm = 0; done = 0 }
+    NR == 1 && $0 == "---" { fm = 1; print; next }
+    fm && !done && /^status:/ { print "status: " st; done = 1; next }
+    { print }
+    END { }
+  ' "$file" > "$tmp"
+  mv "$tmp" "$file"
+}
+
+count_followups() {
+  local file="$1"
+  LC_ALL=C awk '
+    $0 == "## 后续事项" { s = 1; next }
+    s && /^## / { exit }
+    s && /^- \[[ xX]\]/ { n++ }
+    END { print n + 0 }
+  ' "$file"
+}
+
+cmd_finalize() {
+  local id=""
+  local target_status=""
+  local dry_run=0
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --status) target_status="${2:-}"; shift 2 ;;
+      --dry-run) dry_run=1; shift ;;
+      -h|--help) usage; exit 0 ;;
+      *)
+        if [[ -z "$id" ]]; then
+          id="$1"; shift
+        else
+          die "多余的参数: $1"
+        fi
+        ;;
+    esac
+  done
+
+  [[ -n "$id" ]] || die "用法: psr finalize <id> --status solved|workaround|unresolved"
+  case "$target_status" in
+    solved|workaround|unresolved) ;;
+    "") die "--status 必填：solved | workaround | unresolved" ;;
+    *) die "--status 只支持 solved | workaround | unresolved: $target_status" ;;
+  esac
+
+  local root
+  root="$(require_root)"
+
+  local file=""
+  file="$(find "$root/records" -type f -name "${id}-*.md" 2>/dev/null | sort | head -n 1)"
+  [[ -n "$file" ]] || die "找不到记录: $id"
+
+  local rel="${file#"$root"/}"
+  local title
+  title="$(LC_ALL=C awk '/^#[[:space:]]+/ { sub(/^#[[:space:]]+/, ""); print; exit }' "$file")"
+  [[ -n "$title" ]] || title="$id"
+
+  # ---- 按目标状态校验内容 ----
+  local missing=()
+  case "$target_status" in
+    solved)
+      section_has_content "$file" "根因分析" || missing+=("根因分析")
+      section_has_content "$file" "最终解决方案" || missing+=("最终解决方案")
+      section_has_content "$file" "验证方法" || missing+=("验证方法")
+      ;;
+    workaround)
+      section_has_content "$file" "最终解决方案" || missing+=("最终解决方案")
+      section_has_content "$file" "验证方法" || missing+=("验证方法")
+      section_has_content "$file" "限制与风险" || missing+=("限制与风险")
+      ;;
+    unresolved)
+      section_has_content "$file" "原始现象" || missing+=("原始现象")
+      section_has_content "$file" "后续事项" || missing+=("后续事项")
+      ;;
+  esac
+
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    printf '[fail] 无法归档为 %s：以下章节没有有效内容\n' "$target_status" >&2
+    local m
+    for m in "${missing[@]}"; do
+      printf '  - %s\n' "$m" >&2
+    done
+    printf '记录已保存: %s（ID %s）\n' "$rel" "$id" >&2
+    printf '补全后重试: psr finalize %s --status %s\n' "$id" "$target_status" >&2
+    exit 1
+  fi
+
+  if [[ "$dry_run" -eq 1 ]]; then
+    printf '[dry-run] 将把 %s 的状态设为 %s 并同步索引\n' "$id" "$target_status"
+    printf '[dry-run] 记录: %s\n' "$rel"
+    return 0
+  fi
+
+  # ---- 加锁后写入 ----
+  # shellcheck source=/dev/null
+  . "$LIB/lock.sh"
+  # shellcheck source=/dev/null
+  . "$LIB/index.sh"
+  # trap 在函数返回后执行，必须用全局变量而不是 local root。
+  PSR_LOCK_ROOT="$root"
+  trap 'psr_lock_release "$PSR_LOCK_ROOT"' EXIT
+  trap 'psr_lock_release "$PSR_LOCK_ROOT"; exit 130' INT TERM HUP
+  psr_lock_acquire "$root" || die "获取写锁失败"
+
+  local index="$root/INDEX.md"
+  local schema label old_cell new_row row_fields
+  schema="$(psr_index_schema "$index")"
+  label="$(psr_status_label "$target_status" "$schema")"
+
+  set_record_status "$file" "$target_status"
+
+  # 索引状态：工具占位值才覆盖；人工状态保留并检查冲突。
+  local index_note="已同步"
+  if [[ -f "$index" ]] && grep -Fq "$rel" "$index"; then
+    row_fields="$(psr_index_rows "$index" | awk -F'\037' -v id="$id" -v rel="$rel" '
+      ($1 == id) || ($1 == "" && $7 == rel) { print; exit }
+    ')"
+    if [[ -n "$row_fields" ]]; then
+      local f_id f_date f_title f_tools f_status f_root f_rel
+      IFS=$'\037' read -r f_id f_date f_title f_tools f_status f_root f_rel <<< "$row_fields"
+      old_cell="$f_status"
+      if psr_status_is_tool_owned "$old_cell"; then
+        new_row="$(psr_index_row "$schema" "$f_id" "$f_date" "$f_title" "$f_tools" "-" "$label" "$f_root" "$f_rel")"
+        psr_index_replace_row "$index" "$f_id" "$f_rel" "$new_row"
+      else
+        local human_machine
+        human_machine="$(psr_status_machine "$old_cell")"
+        if [[ -n "$human_machine" && "$human_machine" != "$target_status" ]]; then
+          index_note="保留人工状态「${old_cell}」；与机器状态 $target_status 不一致，请确认"
+        fi
+      fi
+    fi
+  else
+    new_row="$(psr_index_row "$schema" "$id" "$(date +%F)" "$title" "-" "-" "$label" "待补充" "$rel")"
+    psr_index_insert "$index" "$new_row" "$id"
+    index_note="已补入索引"
+  fi
+
+  local summary_note="已更新"
+  if ! "$SCRIPTS/update-ai-summary-index.sh" "$root" --no-lock >/dev/null 2>&1; then
+    printf '[fail] 摘要索引更新失败\n' >&2
+    printf '记录已保存: %s（ID %s）\n' "$rel" "$id" >&2
+    printf '恢复: psr finalize %s --status %s\n' "$id" "$target_status" >&2
+    exit 1
+  fi
+
+  local check_note="通过"
+  if ! "$SCRIPTS/check-kb.sh" "$root" --quiet >/dev/null 2>&1; then
+    check_note="发现疑似敏感信息（详见 psr doctor 或 check-kb.sh 输出）"
+  fi
+
+  printf '知识库: %s\n' "$root"
+  printf '已归档: %s\n' "$title"
+  if [[ "$label" == "$target_status" ]]; then
+    printf '状态: %s\n' "$target_status"
+  else
+    printf '状态: %s（%s）\n' "$label" "$target_status"
+  fi
+  printf '索引: %s\n' "$index_note"
+  printf '摘要索引: %s\n' "$summary_note"
+  printf '敏感检查: %s\n' "$check_note"
+  printf '后续事项: %s 项\n' "$(count_followups "$file")"
+}
+
+# ---------------------------------------------------------------- main
+version() {
+  local v=""
+  if [[ -f "$SKILL_DIR/SKILL.md" ]]; then
+    v="$(awk '/^version:/ { sub(/^version:[[:space:]]*/, ""); print; exit }' "$SKILL_DIR/SKILL.md")"
+  fi
+  if [[ -n "$v" ]]; then printf 'psr %s\n' "$v"; else printf 'psr\n'; fi
+}
+
+cmd="${1:-help}"
+[[ $# -gt 0 ]] && shift
+
+case "$cmd" in
+  configure) cmd_configure "$@" ;;
+  init) cmd_init "$@" ;;
+  doctor) cmd_doctor "$@" ;;
+  new) cmd_new "$@" ;;
+  finalize) cmd_finalize "$@" ;;
+  --version|version|-v) version ;;
+  help|-h|--help) usage ;;
+  *) usage >&2; exit 2 ;;
+esac

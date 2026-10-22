@@ -10,9 +10,11 @@ usage() {
 Initialize a problem-solution knowledge base from the bundled template.
 
 Usage:
-  init-kb.sh /path/to/problem-solution-kb [--force] [--dry-run]
+  init-kb.sh /path/to/problem-solution-kb [--with-examples] [--force] [--dry-run]
 
 Behavior:
+  - Creates an empty knowledge base by default; --with-examples also copies
+    the sample record, pattern, and review.
   - Refuses to write into a non-empty directory unless --force is given.
   - With --force, existing files that the template would overwrite are listed
     and copied into <target>/.psr-backup-<timestamp>/ first.
@@ -23,11 +25,13 @@ EOF
 target=""
 force=0
 dry_run=0
+with_examples=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --force) force=1 ;;
     --dry-run) dry_run=1 ;;
+    --with-examples) with_examples=1 ;;
     -h|--help) usage; exit 0 ;;
     *)
       if [[ -z "$target" ]]; then
@@ -85,7 +89,7 @@ if [[ -n "$first_entry" ]]; then
 fi
 
 if [[ "$dry_run" -eq 1 ]]; then
-  printf '[dry-run] would initialize: %s\n' "$target"
+  printf '[dry-run] would initialize: %s (%s)\n' "$target" "$([[ "$with_examples" -eq 1 ]] && echo 'with examples' || echo 'empty')"
   if [[ -n "$conflicts" ]]; then
     printf '[dry-run] would back up %s existing file(s) first:\n' "$(printf '%s\n' "$conflicts" | grep -c .)"
     printf '%s\n' "$conflicts" | sed 's/^/  - /'
@@ -108,7 +112,22 @@ fi
 
 cp -R "$TEMPLATE_DIR/." "$target/"
 
-printf 'Initialized problem-solution knowledge base: %s\n' "$target"
+if [[ "$with_examples" -eq 0 ]]; then
+  # 默认空库：移除示例记录/方法论/复盘，并重建两个索引。
+  rm -f "$target"/records/2026/2026-01-15-001-*.md
+  rm -f "$target"/patterns/mcp-timeout-playbook.md
+  rm -f "$target"/reviews/2026-01-15.md
+  {
+    printf '# Problem-Solution Index\n\n'
+    printf '| Date | Title | Status | Tools | Tags | Record |\n'
+    printf '| --- | --- | --- | --- | --- | --- |\n'
+  } > "$target/INDEX.md"
+  if [[ -x "$SCRIPT_DIR/update-ai-summary-index.sh" ]]; then
+    "$SCRIPT_DIR/update-ai-summary-index.sh" "$target" >/dev/null
+  fi
+fi
+
+printf 'Initialized problem-solution knowledge base: %s (%s)\n' "$target" "$([[ "$with_examples" -eq 1 ]] && echo 'with examples' || echo 'empty')"
 printf 'Configure it with:\n'
 printf '  export PROBLEM_SOLUTION_KB_ROOT=%q\n' "$target"
 printf 'or:\n'

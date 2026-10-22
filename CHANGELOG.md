@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-22
+
+### Added
+
+- `bin/psr`: unified CLI with `configure`, `init`, `doctor`, `new`, and `finalize`.
+  `configure --show` reports the resolved knowledge base and where the setting came
+  from (env, project marker, XDG config). `new --mode quick` uses the quick template.
+- `finalize <id> --status ...` validates per target status (solved / workaround /
+  unresolved), sets the machine status, syncs both indexes, runs the secret check,
+  and reports each result. Failures after the record is written include the record
+  id and the retry command.
+- Status vocabulary in `lib/index.sh`: tool-owned cells are updated, human cells such
+  as `已解决（审计）` are preserved and reported when they disagree with the machine status.
+- `init-kb.sh` creates an empty knowledge base by default; `--with-examples` keeps the
+  sample record/pattern/review.
+- `install.sh --bin [--bin-dir DIR]` links `psr` into `~/.local/bin` and refuses to
+  replace an unrelated existing command.
+- `sync-kb-lib.sh` also vendors `bin/psr`, so a knowledge base has the same entry point.
+
+### Changed
+
+- Draft partition in the summary index is driven by status only; an archived record
+  with a missing conclusion stays visible (doctor still reports the placeholder).
+
+
 ## [0.5.1] - 2026-10-22
 
 ### Added
@@ -164,7 +189,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `agents/*.yaml` metadata for multiple runtimes.
 - GitHub Actions workflow for validation and smoke tests.
 
-[Unreleased]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.3.0...v0.4.0

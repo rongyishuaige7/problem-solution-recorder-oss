@@ -11,6 +11,7 @@ DOCTOR="$SCRIPT_DIR/doctor-local.sh"
 CHECK="$SCRIPT_DIR/check-kb.sh"
 REBUILD="$SCRIPT_DIR/rebuild-index.sh"
 INSTALL="$SCRIPT_DIR/install.sh"
+PSR="$SKILL_DIR/bin/psr"
 
 usage() {
   cat <<'EOF'
@@ -403,5 +404,61 @@ cp "$kb_yaml/AI_SUMMARY_INDEX.md" "$tmp/yaml-before"
 "$SUMMARY" "$kb_yaml" >/dev/null 2>&1
 cmp -s "$tmp/yaml-before" "$kb_yaml/AI_SUMMARY_INDEX.md" || fail "unchanged records still rewrote the summary index"
 pass "YAML 字段级诊断；无变化时文件逐字节一致"
+
+# ---------------------------------------------------------------- psr 完整路径
+# 空库初始化 → 子目录创建快记 → 补全 → finalize → 双索引 → 幂等
+kb_acc="$tmp/kb-accept"
+# 本段验证“从子目录靠项目标记找到知识库”，必须让环境变量让位。
+unset PROBLEM_SOLUTION_KB_ROOT
+"$PSR" init "$kb_acc" >/dev/null
+[[ -f "$kb_acc/INDEX.md" ]] || fail "psr init did not create INDEX.md"
+[[ -z "$(find "$kb_acc/records" -type f -name '*.md' 2>/dev/null)" ]] || fail "psr init should create an empty knowledge base by default"
+
+mkdir -p "$tmp/proj/sub"
+"$PSR" configure --project "$kb_acc" --dir "$tmp/proj" >/dev/null
+[[ -f "$tmp/proj/.problem-solution-root" ]] || fail "psr configure --project did not write the marker"
+
+quick_path="$(cd "$tmp/proj/sub" && "$PSR" new "Acceptance path" --mode quick --slug acceptance | awk '/^已创建:/ { print $2 }')"
+[[ -n "$quick_path" ]] || fail "psr new --mode quick failed from a subdirectory"
+quick_file="$kb_acc/$quick_path"
+quick_id="$(basename "$quick_file" | cut -c1-14)"
+
+fill_record() {
+  local file="$1"
+  local tmp
+  tmp="$(mktemp "${TMPDIR:-/tmp}/psr-fill.XXXXXX")"
+  LC_ALL=C awk '
+    /^## / { target = $0; print; next }
+    target == "## 根因分析" && $0 == "-" { print "payload 过大，高延迟链路超过默认超时。"; next }
+    target == "## 最终解决方案" && $0 == "-" { print "调大超时并拆分查询。"; next }
+    target == "## 验证方法" && $0 == "-" { print "20 次等价查询失败率为 0。"; next }
+    target == "## 限制与风险" && $0 == "-" { print "仅适用于读请求。"; next }
+    { print }
+  ' "$file" > "$tmp"
+  mv "$tmp" "$file"
+}
+
+# 未补全时 finalize 必须失败，并提示记录已保存
+if ( cd "$tmp/proj/sub" && "$PSR" finalize "$quick_id" --status solved ) >/dev/null 2>"$tmp/acc.err"; then
+  fail "finalize accepted an empty quick record"
+fi
+grep -Fq "记录已保存" "$tmp/acc.err" || fail "finalize failure did not report the saved record"
+grep -Fq "psr finalize $quick_id" "$tmp/acc.err" || fail "finalize failure did not print a recovery command"
+
+fill_record "$quick_file"
+( cd "$tmp/proj/sub" && "$PSR" finalize "$quick_id" --status solved ) >/dev/null
+grep -Fq "status: solved" "$quick_file" || fail "finalize did not update the record status"
+grep -Eq "^\| [0-9]{4}-[0-9]{2}-[0-9]{2} \| .* \| solved \|" "$kb_acc/INDEX.md" || fail "finalize did not update the INDEX status"
+grep -Fq -- "- status: solved" "$kb_acc/AI_SUMMARY_INDEX.md" || fail "finalize did not update the summary index"
+
+cp "$kb_acc/INDEX.md" "$tmp/acc-index"
+cp "$kb_acc/AI_SUMMARY_INDEX.md" "$tmp/acc-summary"
+( cd "$tmp/proj/sub" && "$PSR" finalize "$quick_id" --status solved ) >/dev/null
+cmp -s "$tmp/acc-index" "$kb_acc/INDEX.md" || fail "second finalize changed INDEX.md"
+cmp -s "$tmp/acc-summary" "$kb_acc/AI_SUMMARY_INDEX.md" || fail "second finalize changed the summary index"
+pass "psr 完整路径：空库 → 子目录快记 → finalize → 双索引 → 幂等"
+
+# 恢复全局环境变量，供后续用例使用
+export PROBLEM_SOLUTION_KB_ROOT="$kb"
 
 printf '[ok] smoke test passed\n'

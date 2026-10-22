@@ -47,6 +47,7 @@ for agent in openai.yaml claude.yaml cursor.yaml openclaw.yaml; do
   [[ -f "$SKILL_DIR/agents/$agent" ]] || fail "missing agents/$agent"
 done
 [[ -d "$SKILL_DIR/assets/minimal-knowledge-base" ]] || fail "missing assets/minimal-knowledge-base"
+[[ -x "$SKILL_DIR/bin/psr" ]] || fail "missing executable bin/psr"
 for lib in record-fields.awk lock.sh ids.sh index.sh secrets.sh; do
   [[ -f "$SKILL_DIR/scripts/lib/$lib" ]] || fail "missing scripts/lib/$lib"
 done

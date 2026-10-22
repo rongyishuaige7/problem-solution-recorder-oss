@@ -6,7 +6,7 @@ usage() {
 Resolve a problem-solution knowledge base root.
 
 Usage:
-  resolve-kb-root.sh [explicit-path]
+  resolve-kb-root.sh [explicit-path] [--explain]
 
 Resolution order:
   1. explicit-path argument
@@ -14,6 +14,9 @@ Resolution order:
   3. .problem-solution-root in cwd or a parent directory
   4. $XDG_CONFIG_HOME/problem-solution-recorder/root
   5. ~/.config/problem-solution-recorder/root
+
+--explain prints "<root>\t<source>" so callers can show where the
+configuration came from (env, marker:<file>, xdg:<file>, arg).
 EOF
 }
 
@@ -31,19 +34,48 @@ validate_root() {
   printf '%s\n' "$resolved"
 }
 
-if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-  usage
-  exit 0
-fi
+explain=0
+arg=""
 
-if [[ "${1:-}" != "" ]]; then
-  validate_root "$1" && exit 0
-  printf 'Invalid knowledge base root: %s\n' "$1" >&2
+for a in "$@"; do
+  case "$a" in
+    --explain) explain=1 ;;
+    -h|--help) usage; exit 0 ;;
+    *)
+      if [[ -z "$arg" ]]; then
+        arg="$a"
+      else
+        printf 'Unexpected argument: %s\n' "$a" >&2
+        exit 2
+      fi
+      ;;
+  esac
+done
+
+emit() {
+  local root="$1"
+  local source="$2"
+  if [[ "$explain" -eq 1 ]]; then
+    printf '%s\t%s\n' "$root" "$source"
+  else
+    printf '%s\n' "$root"
+  fi
+}
+
+if [[ -n "$arg" ]]; then
+  if resolved="$(validate_root "$arg")"; then
+    emit "$resolved" "arg"
+    exit 0
+  fi
+  printf 'Invalid knowledge base root: %s\n' "$arg" >&2
   exit 1
 fi
 
 if [[ "${PROBLEM_SOLUTION_KB_ROOT:-}" != "" ]]; then
-  validate_root "$PROBLEM_SOLUTION_KB_ROOT" && exit 0
+  if resolved="$(validate_root "$PROBLEM_SOLUTION_KB_ROOT")"; then
+    emit "$resolved" "env"
+    exit 0
+  fi
   printf 'PROBLEM_SOLUTION_KB_ROOT is set but invalid: %s\n' "$PROBLEM_SOLUTION_KB_ROOT" >&2
   exit 1
 fi
@@ -59,7 +91,10 @@ while :; do
       "") ;;
       *) root="$dir/$root" ;;
     esac
-    validate_root "$root" && exit 0
+    if resolved="$(validate_root "$root")"; then
+      emit "$resolved" "marker:$marker"
+      exit 0
+    fi
     printf 'Marker file exists but points to an invalid root: %s\n' "$marker" >&2
     exit 1
   fi
@@ -76,7 +111,10 @@ for config_file in "$config_home/problem-solution-recorder/root" "$HOME/.config/
     "") ;;
     *) root="$(dirname "$config_file")/$root" ;;
   esac
-  validate_root "$root" && exit 0
+  if resolved="$(validate_root "$root")"; then
+    emit "$resolved" "xdg:$config_file"
+    exit 0
+  fi
   printf 'Config file exists but points to an invalid root: %s\n' "$config_file" >&2
   exit 1
 done
@@ -93,4 +131,3 @@ Or initialize a new repository with:
   init-kb.sh /path/to/problem-solution-kb
 EOF
 exit 1
-

@@ -122,3 +122,83 @@ psr_index_rows() {
     }
   ' "$index"
 }
+
+# ---- status vocabulary -----------------------------------------------------
+# Machine status lives in the record front matter (draft/investigating/solved/
+# workaround/unresolved). The index cell may be a human label such as
+# "已解决（审计）"; tool-owned cells are "草稿"/"draft"/"待填写"/"-".
+
+psr_status_label() {
+  local machine="$1"
+  local schema="$2"
+  if [[ "$schema" == "7" ]]; then
+    case "$machine" in
+      draft) printf '草稿' ;;
+      investigating) printf '调查中' ;;
+      solved) printf '已解决' ;;
+      workaround) printf '临时方案' ;;
+      unresolved) printf '未解决' ;;
+      *) printf '%s' "$machine" ;;
+    esac
+  else
+    printf '%s' "$machine"
+  fi
+}
+
+psr_status_machine() {
+  local cell="$1"
+  case "$cell" in
+    solved|已解决*) printf 'solved' ;;
+    workaround|临时方案*|变通*) printf 'workaround' ;;
+    investigating|调查中*|实施中*) printf 'investigating' ;;
+    unresolved|未解决*) printf 'unresolved' ;;
+    draft|草稿*) printf 'draft' ;;
+    *) printf '' ;;
+  esac
+}
+
+psr_status_is_tool_owned() {
+  case "$1" in
+    ""|"-"|"待填写"|draft|草稿) return 0 ;;
+  esac
+  return 1
+}
+
+# Replace the row matching <id> (7-column) or <rel> (6-column) with new_row.
+psr_index_replace_row() {
+  local index="$1"
+  local id="$2"
+  local rel="$3"
+  local row="$4"
+  local tmp
+
+  tmp="$(mktemp "${TMPDIR:-/tmp}/psr-index-replace.XXXXXX")"
+  PSR_NEW_ROW="$row" awk -v idkey="$id" -v relkey="$rel" '
+    BEGIN { done = 0 }
+    {
+      if (!done) {
+        probe = $0
+        gsub(/\\\|/, "\001", probe)
+        if (probe ~ /^\|[[:space:]]*[0-9]{4}-[0-9]{2}-[0-9]{2}/) {
+          n = split(probe, f, "|")
+          idv = f[2]; gsub(/^[[:space:]]+|[[:space:]]+$/, "", idv)
+          # 链接列的位置随 6/7 列而变，按“含 ](…)”从后往前找，避免列数误判。
+          linkv = ""
+          for (i = n; i >= 1; i--) {
+            if (f[i] ~ /\]\([^)]+\)/) { linkv = f[i]; break }
+          }
+          if (match(linkv, /\(([^)]+)\)/)) {
+            relv = substr(linkv, RSTART + 1, RLENGTH - 2)
+            if ((idkey != "" && idv == idkey) || (idkey == "" && relv == relkey)) {
+              print ENVIRON["PSR_NEW_ROW"]
+              done = 1
+              next
+            }
+          }
+        }
+      }
+      print
+    }
+  ' "$index" > "$tmp"
+  mv "$tmp" "$index"
+}

@@ -114,9 +114,8 @@ emit_record() {
   case "$status_value" in
     draft|inbox) is_draft=1 ;;
   esac
-  if [[ "$is_draft" -eq 0 && "$problem_signature" == "-" ]]; then
-    is_draft=1
-  fi
+  # 只有 draft/inbox 进入草稿区；已归档但缺一句话结论的记录仍要可见，
+  # 由 doctor 的“占位结论”检查提醒补全，而不是从召回区消失。
 
   if [[ "$is_draft" -eq 1 ]]; then
     printf -- '- %s%s%s — %s (status: %s)\n' "$BT" "$cur_rel" "$BT" "$title_value" "$status_value" >> "$gen_draft"

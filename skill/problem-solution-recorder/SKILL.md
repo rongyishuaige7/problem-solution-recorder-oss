@@ -1,6 +1,6 @@
 ---
 name: problem-solution-recorder
-version: 0.5.1
+version: 0.6.0
 license: MIT
 description: Maintain a configurable problem-solution knowledge base for solved incidents, debugging sessions, reusable troubleshooting patterns, and periodic reviews. Use when the user asks to record, archive, review, summarize, search, or preserve a solved issue; when a multi-step debugging task involving CLI tools, MCP, APIs, permissions, configs, dependencies, build errors, adapters, or AI tool behavior is completed; or when the user wants to reuse lessons from previous incidents.
 metadata:
@@ -19,6 +19,31 @@ metadata:
 # Problem Solution Recorder
 
 Use this skill to maintain a problem-solution knowledge base outside the skill. The skill is a workflow wrapper; the user's live Markdown repository remains the source of truth.
+
+## Command Line Entry
+
+`bin/psr` is the standard entry point. Legacy scripts and a knowledge base's `qs`
+keep working and call the same implementation.
+
+```bash
+psr configure --global /path/to/kb     # or --project [--dir D]; --show prints root + source
+psr init /path/to/kb [--with-examples] # empty knowledge base by default
+psr doctor                             # knowledge base + installation/discovery state
+psr new "Title" --mode quick|full      # quick uses _templates/快记模板.md
+psr finalize <id> --status solved|workaround|unresolved
+```
+
+`finalize` validates by target status before writing:
+
+- `solved`: 根因分析, 最终解决方案, 验证方法 must contain real content.
+- `workaround`: 最终解决方案, 验证方法, 限制与风险 must contain real content.
+- `unresolved`: 原始现象, 后续事项 must contain real content.
+
+It then sets the machine status, syncs `INDEX.md` and the summary index, runs the
+secret check, and reports each result. Tool-owned index cells (`草稿`/`draft`/
+`待填写`) are updated; human cells such as `已解决（审计）` are kept and reported as a
+conflict when they disagree with the machine status. If a later step fails, the
+record is already saved and the message includes its id plus the retry command.
 
 ## Resolve The Knowledge Base
 
