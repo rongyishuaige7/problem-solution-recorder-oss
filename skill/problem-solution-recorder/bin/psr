@@ -339,7 +339,8 @@ section_has_content() {
       sub(/^[[:space:]]+/, "", t)
       sub(/[[:space:]]+$/, "", t)
       if (t == "") return 0
-      if (t ~ /^#/) return 0
+      # 只有子标题没有正文，不算有效内容。
+      if (t ~ /^#+[[:space:]]/) return 0
       if (t ~ /^[{}[\].,;]+$/) return 0
       if (placeholder(t)) return 0
       return 1
@@ -379,6 +380,7 @@ section_has_content() {
         t = line
         gsub(/^[[:space:]*-]+/, "", t)
         gsub(/[[:space:]]+$/, "", t)
+        if (t ~ /^#+[[:space:]]/) next
         if (placeholder(t)) next
         found = 1
         exit

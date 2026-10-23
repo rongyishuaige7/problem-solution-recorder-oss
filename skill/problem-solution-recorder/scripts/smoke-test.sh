@@ -594,13 +594,13 @@ fi
 exit 1
 EOF
 chmod +x "$tmp/lock-holder.sh" "$tmp/lock-contender.sh"
-PSR_LOCK_TEST_PAUSE=3.0 "$tmp/lock-holder.sh" "$SKILL_DIR" "$kb_lock" & lock_holder_pid=$!
+PSR_LOCK_TEST_PAUSE_GUARD=3.0 "$tmp/lock-holder.sh" "$SKILL_DIR" "$kb_lock" & lock_holder_pid=$!
 # 等到回收者真正进入回收窗口再让竞争者尝试，避免用固定 sleep 赌调度。
 for _ in $(seq 1 500); do
-  [[ -d "$kb_lock/.psr.lock.reclaim" ]] && break
+  [[ -d "$kb_lock/.psr.lock.guard" ]] && break
   sleep 0.02
 done
-[[ -d "$kb_lock/.psr.lock.reclaim" ]] || fail "holder never took the reclaim marker"
+[[ -d "$kb_lock/.psr.lock.guard" ]] || fail "holder never took the reclaim guard"
 set +e
 "$tmp/lock-contender.sh" "$SKILL_DIR" "$kb_lock"
 lock_contender_rc=$?
@@ -853,30 +853,21 @@ pass "空库可重建；删除最后一条需 --allow-empty"
 
 
 # ---------------------------------------------------------------- v0.8.3 回归
-# S01 活着的回收者即使长时间暂停，其标记也不能被按时间抢占
-kb_live="$tmp/kb-live-reclaim"
-mkdir -p "$kb_live/.psr.lock"
+# S01 活 guard 不被抢占：陈旧锁只能由 guard 持有者删除
+kb_live="$tmp/kb-live-guard"
+mkdir -p "$kb_live/.psr.lock" "$kb_live/.psr.lock.guard"
 printf '999999\n' > "$kb_live/.psr.lock/pid"
-touch -t 200001010000 "$kb_live/.psr.lock"
-cat > "$tmp/live-holder.sh" <<LIVEHOLDER
-#!/usr/bin/env bash
-set -euo pipefail
-. "$SKILL_DIR/scripts/lib/lock.sh"
-PSR_LOCK_TEST_PAUSE=2 psr_lock_acquire "$kb_live" 100 || exit 9
-psr_lock_release "$kb_live"
-LIVEHOLDER
-chmod +x "$tmp/live-holder.sh"
-"$tmp/live-holder.sh" & live_holder=$!
-for _ in $(seq 1 300); do [[ -d "$kb_live/.psr.lock.reclaim" ]] && break; sleep 0.02; done
-[[ -d "$kb_live/.psr.lock.reclaim" ]] || fail "live reclaimer never took the marker"
-touch -t 200001010000 "$kb_live/.psr.lock.reclaim"
+printf '%s\n' "$$" > "$kb_live/.psr.lock.guard/pid"
+printf 'live:guard\n' > "$kb_live/.psr.lock.guard/token"
+touch -t 200001010000 "$kb_live/.psr.lock" "$kb_live/.psr.lock.guard"
 set +e
-bash -c '. "$1/scripts/lib/lock.sh"; psr_lock_acquire "$2" 2 && { psr_lock_release "$2"; exit 0; }; exit 1' _ "$SKILL_DIR" "$kb_live"
-live_contender=$?
+bash -c '. "$1/scripts/lib/lock.sh"; psr_lock_acquire "$2" 2' _ "$SKILL_DIR" "$kb_live"
+live_guard_rc=$?
 set -e
-wait "$live_holder"
-[[ "$live_contender" -ne 0 ]] || fail "a live reclaimer's aged marker was stolen"
-pass "活回收者的标记不会被按时间抢占"
+[[ "$live_guard_rc" -ne 0 ]] || fail "a live reclaim guard was preempted"
+[[ -d "$kb_live/.psr.lock" ]] || fail "the stale lock was removed while a live guard existed"
+[[ "$(cat "$kb_live/.psr.lock.guard/token")" == "live:guard" ]] || fail "the live guard marker was replaced"
+pass "活 guard 不被抢占，陈旧锁保持原样"
 
 # S02 注释从章节之前开始、包住全部必填章节时不得归档
 kb_hidden="$tmp/kb-hidden-comment"
@@ -920,22 +911,20 @@ pass "检索契约：共同字段 + 全文（不限 20 行）"
 
 
 # ---------------------------------------------------------------- v0.8.4 回归
-# T01 按旧 token 删除已被替换的回收标记必须被拒绝
-kb_tok="$tmp/kb-token-guard"
-mkdir -p "$kb_tok/.psr.lock.reclaim"
-printf '999999\n' > "$kb_tok/.psr.lock.reclaim/pid"
-printf 'dead:token\n' > "$kb_tok/.psr.lock.reclaim/token"
-rm -rf "$kb_tok/.psr.lock.reclaim"
-mkdir -p "$kb_tok/.psr.lock.reclaim"
-printf '%s\n' "$$" > "$kb_tok/.psr.lock.reclaim/pid"
-printf 'live:token\n' > "$kb_tok/.psr.lock.reclaim/token"
+# T01 陈旧锁只由 guard 持有者删除：并发回收不会出现两个写入者（见 U01 交替回归）
+kb_tok="$tmp/kb-guard-owner"
+mkdir -p "$kb_tok/.psr.lock" "$kb_tok/.psr.lock.guard"
+printf '999999\n' > "$kb_tok/.psr.lock/pid"
+printf 'dead:guard\n' > "$kb_tok/.psr.lock.guard/token"
+printf '999999\n' > "$kb_tok/.psr.lock.guard/pid"
+touch -t 200001010000 "$kb_tok/.psr.lock" "$kb_tok/.psr.lock.guard"
 set +e
-bash -c '. "$1/scripts/lib/lock.sh"; psr_lock_drop_instance "$2/.psr.lock.reclaim" "dead:token"' _ "$SKILL_DIR" "$kb_tok"
-token_guard_rc=$?
+bash -c '. "$1/scripts/lib/lock.sh"; psr_lock_acquire "$2" 2' _ "$SKILL_DIR" "$kb_tok" >/dev/null 2>&1
+guard_owner_rc=$?
 set -e
-[[ "$token_guard_rc" -ne 0 ]] || fail "a stale token deleted a replaced live reclaim marker"
-[[ "$(cat "$kb_tok/.psr.lock.reclaim/token")" == "live:token" ]] || fail "the live reclaim marker was not restored"
-pass "回收标记按实例 token 删除，替换后的活标记不受影响"
+[[ "$guard_owner_rc" -ne 0 ]] || fail "acquisition succeeded while a foreign guard existed"
+[[ "$(cat "$kb_tok/.psr.lock.guard/token")" == "dead:guard" ]] || fail "a foreign guard was removed by a non-owner"
+pass "非持有者不会删除 guard，陈旧锁保持原样"
 
 # T02 代码示例中的章节标题不算真实章节
 kb_code="$tmp/kb-code-example"
@@ -970,5 +959,56 @@ severity_rc=$?
 set -e
 [[ "$severity_rc" -eq 1 ]] || fail "search matched a non-recall metadata field (severity)"
 pass "检索全文不限行，且只使用共同召回字段"
+
+
+# ---------------------------------------------------------------- v0.8.5 回归
+# U01 整个临界区最多一个写入者（含陈旧锁回收与放大的 guard 窗口）
+kb_crit="$tmp/kb-critical"
+mkdir -p "$kb_crit/.psr.lock"
+printf '999999\n' > "$kb_crit/.psr.lock/pid"
+touch -t 200001010000 "$kb_crit/.psr.lock"
+cat > "$tmp/crit-worker.sh" <<CRITEOF
+#!/usr/bin/env bash
+set -euo pipefail
+. "$SKILL_DIR/scripts/lib/lock.sh"
+psr_lock_acquire "$kb_crit" 200 || exit 9
+echo "enter \$\$" >> "$kb_crit/log"
+sleep 0.05
+echo "exit \$\$" >> "$kb_crit/log"
+psr_lock_release "$kb_crit"
+CRITEOF
+chmod +x "$tmp/crit-worker.sh"
+for _ in 1 2 3 4; do PSR_LOCK_TEST_PAUSE_GUARD=0.2 "$tmp/crit-worker.sh" & done
+wait
+crit_lines="$(wc -l < "$kb_crit/log" | tr -d ' ')"
+[[ "$crit_lines" -eq 8 ]] || fail "critical-section log has $crit_lines lines (expected 8)"
+crit_bad="$(awk '{ if (NR % 2 == 1 && $1 != "enter") bad=1; if (NR % 2 == 0 && $1 != "exit") bad=1; if (NR % 2 == 0 && $2 != prev) bad=1; if (NR % 2 == 1) prev=$2 } END { print bad+0 }' "$kb_crit/log")"
+[[ "$crit_bad" -eq 0 ]] || fail "two writers overlapped in the critical section"
+pass "陈旧锁回收下整个临界区最多一个写入者"
+
+# U02 只有三级标题、没有正文的章节不得归档
+kb_heading="$tmp/kb-heading-only"
+"$PSR" init "$kb_heading" >/dev/null
+mkdir -p "$kb_heading/records/2026"
+printf -- '---\nid: 2026-10-21-001\ntitle: "空章节"\ndate: 2026-10-21\nstatus: draft\n---\n\n# 空章节\n\n## 根因分析\n\n### 子标题\n\n## 最终解决方案\n\n### 子标题\n\n## 验证方法\n\n### 子标题\n' > "$kb_heading/records/2026/2026-10-21-001-empty.md"
+set +e
+PROBLEM_SOLUTION_KB_ROOT="$kb_heading" "$PSR" finalize 2026-10-21-001 --status solved >/dev/null 2>&1
+heading_rc=$?
+set -e
+[[ "$heading_rc" -ne 0 ]] || fail "sub-headings without body text counted as section content"
+pass "只有子标题的空章节被拒绝"
+
+# U03 表格、星号代码与链接的清理规则与 Web 一致
+kb_clean="$tmp/kb-clean-rules"
+"$PSR" init "$kb_clean" >/dev/null
+mkdir -p "$kb_clean/records/2026"
+fence3='```'
+printf -- '---\nid: 2026-10-21-001\ntitle: "清理规则"\ndate: 2026-10-21\nstatus: solved\n---\n\n# 清理规则\n\n## 根因分析\n\n| 层级 | 原因 |\n|---|---|\n| 表层 | TABLE_ROOT_TOKEN |\n\n%spython\ndef f(*args):\n    return args\n%s\n\n链接见 [设计文档](https://example.com/LINK_URL_TOKEN)。\n' "$fence3" "$fence3" > "$kb_clean/records/2026/2026-10-21-001-clean.md"
+clean_out="$(LC_ALL=C awk -v root="$kb_clean" -v maxlines=50 -f "$SCRIPT_DIR/lib/record-fields.awk" "$kb_clean/records/2026/2026-10-21-001-clean.md" | grep -a '^@F	root')"
+printf '%s' "$clean_out" | grep -Fq "TABLE_ROOT_TOKEN" || fail "table content was dropped from the root cause"
+printf '%s' "$clean_out" | grep -Fq '*args' || fail "asterisk code was stripped from the root cause"
+printf '%s' "$clean_out" | grep -Fq "设计文档" || fail "link text was dropped from the root cause"
+printf '%s' "$clean_out" | grep -Fq "LINK_URL_TOKEN" && fail "link target leaked into the root cause"
+pass "表格与星号代码保留，链接只留文本"
 
 printf '[ok] smoke test passed\n'

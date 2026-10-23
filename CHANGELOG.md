@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.5] - 2026-10-23
+
+### Fixed
+
+- Reclaiming a stale lock no longer moves or renames the lock path. Removal happens only
+  while holding `<lock>.guard`, a second `mkdir` mutex held for microseconds, so the lock
+  path is never left empty for another writer to claim. The guard is never reclaimed
+  automatically: a crashed guard holder blocks reclaim (not acquisition) until a human
+  removes it, and the timeout message prints the exact command. Regression asserts that
+  the whole critical section has at most one writer, including a widened guard window.
+- Sections whose only content is a sub-heading (`### ...`) are empty: `finalize` refuses
+  them instead of archiving.
+- Markdown cleaning is the same in the canonical parser and the dashboard: table rows are
+  kept as evidence, link targets are dropped in favour of their text, and a single `*`
+  (for example `*args`) is content rather than emphasis. A root cause described only in a
+  table now reaches the summary and the page.
+- Hit labels distinguish the three cases: a term found only in long body text shows
+  “正文”, a term found in a field plus one in long text shows “跨字段（工具、正文）”, and
+  terms spread across named fields show those fields.
+
+
 ## [0.8.4] - 2026-10-23
 
 ### Fixed
@@ -371,7 +392,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `agents/*.yaml` metadata for multiple runtimes.
 - GitHub Actions workflow for validation and smoke tests.
 
-[Unreleased]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.4...HEAD
+[Unreleased]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.5...HEAD
+[0.8.5]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.4...v0.8.5
 [0.8.4]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.3...v0.8.4
 [0.8.3]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.2...v0.8.3
 [0.8.2]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.1...v0.8.2

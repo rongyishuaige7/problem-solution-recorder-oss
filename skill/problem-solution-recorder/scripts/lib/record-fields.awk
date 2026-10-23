@@ -42,7 +42,15 @@ function add_line(raw,   line, key) {
   key = map[section]
   if (key == "") return
   line = strip_line(raw)
-  if (line == "" || line ~ /^\|/) return
+  # 表格行也要保留证据：去掉竖线后按文本收录，跳过 |---|---| 分隔行。
+  if (line ~ /^\|/) {
+    gsub(/\|/, " ", line)
+    gsub(/[[:space:]]+/, " ", line)
+    sub(/^ /, "", line)
+    sub(/ $/, "", line)
+    if (line ~ /^[-: ]+$/) return
+  }
+  if (line == "") return
   if (count >= maxlines) return
   out = (out == "" ? line : out "; " line)
   if (key == "follow") items = (items == "" ? line : items "\036" line)
@@ -72,11 +80,21 @@ function reset() {
   delete fmv
 }
 
+# 与 web/generate-data.js 的 cleanMarkdown 保持同一套清理规则：
+# 去列表符号、链接只留文本、去行内代码/粗体标记；单个 * 属于内容，保留。
 function strip_line(s) {
   gsub(/^[[:space:]]*([-*]+|[0-9]+\.)[[:space:]]+/, "", s)
   gsub(/^[[:space:]]+/, "", s)
   gsub(/[[:space:]]+$/, "", s)
-  gsub(/[`*]/, "", s)
+
+  while (match(s, /\[[^]]*\]\([^)]*\)/)) {
+    label = substr(s, RSTART + 1, RLENGTH - 2)
+    sub(/\]\(.*/, "", label)
+    s = substr(s, 1, RSTART - 1) label substr(s, RSTART + RLENGTH)
+  }
+
+  gsub(/`/, "", s)
+  gsub(/\*\*/, "", s)
   return s
 }
 
