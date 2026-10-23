@@ -23,6 +23,8 @@ Behavior:
     every cell from the records.
   - --dry-run / --preview prints a diff instead of writing.
   - --check exits 1 when the file is out of date (no write).
+  - --allow-empty permits rebuilding an empty index when records/ has no
+    entries (otherwise existing rows would be dropped silently).
   - Writes are skipped when the result is byte-identical.
 EOF
 }
@@ -31,12 +33,14 @@ root_arg=""
 dry_run=0
 check_only=0
 overwrite_handwritten=0
+allow_empty=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dry-run|--preview) dry_run=1; shift ;;
     --check) check_only=1; shift ;;
     --overwrite-handwritten) overwrite_handwritten=1; shift ;;
+    --allow-empty) allow_empty=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *)
       if [[ -z "$root_arg" ]]; then
@@ -84,36 +88,50 @@ while IFS= read -r f; do
   files+=("$f")
 done < "$tmp_dir/files"
 
+empty_library=0
 if [[ ${#files[@]} -eq 0 ]]; then
-  printf 'No records found under %s\n' "$records_dir" >&2
-  exit 1
+  existing_rows=0
+  if [[ -f "$index" ]]; then
+    existing_rows="$(grep -cE '^\|[[:space:]]*[0-9]{4}-[0-9]{2}-[0-9]{2}' "$index" || true)"
+  fi
+  if [[ "$existing_rows" -gt 0 && "$allow_empty" -eq 0 ]]; then
+    printf '[fail] 没有记录，但 INDEX.md 仍有 %s 行；重建会清空它们。\n' "$existing_rows" >&2
+    printf '确认后重跑: rebuild-index.sh "%s" --allow-empty\n' "$root" >&2
+    exit 1
+  fi
+  printf '[warn] 没有记录，将重建为空索引\n' >&2
+  empty_library=1
 fi
 
 stream="$tmp_dir/stream"
 awk_err="$tmp_dir/awk.err"
 
-set +e
-LC_ALL=C awk -v root="$root" -v maxlines=2 -f "$PARSER" "${files[@]}" > "$stream" 2> "$awk_err"
-awk_rc=$?
-set -e
+if [[ "$empty_library" -eq 1 ]]; then
+  : > "$stream"
+else
+  set +e
+  LC_ALL=C awk -v root="$root" -v maxlines=4 -f "$PARSER" "${files[@]}" > "$stream" 2> "$awk_err"
+  awk_rc=$?
+  set -e
 
-if [[ "$awk_rc" -ne 0 ]]; then
-  cat "$awk_err" >&2
-  printf '[fail] could not read every record (awk exit %s); %s left unchanged.\n' "$awk_rc" "$index" >&2
-  exit 1
-fi
-parsed_records="$(grep -c '^@R' "$stream" || true)"
-expected_records=0
-for f in "${files[@]}"; do
-  [[ -s "$f" ]] && expected_records=$(( expected_records + 1 ))
-done
-if [[ "$parsed_records" -ne "$expected_records" ]]; then
-  cat "$awk_err" >&2
-  printf '[fail] parsed %s of %s non-empty records; %s left unchanged.\n' "$parsed_records" "$expected_records" "$index" >&2
-  exit 1
-fi
-if [[ "$expected_records" -ne "${#files[@]}" ]]; then
-  printf '[warn] skipped %s empty record file(s)\n' "$(( ${#files[@]} - expected_records ))" >&2
+  if [[ "$awk_rc" -ne 0 ]]; then
+    cat "$awk_err" >&2
+    printf '[fail] could not read every record (awk exit %s); %s left unchanged.\n' "$awk_rc" "$index" >&2
+    exit 1
+  fi
+  parsed_records="$(grep -c '^@R' "$stream" || true)"
+  expected_records=0
+  for f in "${files[@]}"; do
+    [[ -s "$f" ]] && expected_records=$(( expected_records + 1 ))
+  done
+  if [[ "$parsed_records" -ne "$expected_records" ]]; then
+    cat "$awk_err" >&2
+    printf '[fail] parsed %s of %s non-empty records; %s left unchanged.\n' "$parsed_records" "$expected_records" "$index" >&2
+    exit 1
+  fi
+  if [[ "$expected_records" -ne "${#files[@]}" ]]; then
+    printf '[warn] skipped %s empty record file(s)\n' "$(( ${#files[@]} - expected_records ))" >&2
+  fi
 fi
 
 # 选择列布局

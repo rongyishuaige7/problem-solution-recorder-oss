@@ -175,10 +175,11 @@ EOF
 grep -Fq -- "- tools: codex, claude-code" "$kb_parse/AI_SUMMARY_INDEX.md" || fail "multi-line YAML tools list not parsed"
 grep -Fq -- "- tags: mcp, debug" "$kb_parse/AI_SUMMARY_INDEX.md" || fail "inline YAML tags list not parsed"
 grep -Fq "现象第二行" "$kb_parse/AI_SUMMARY_INDEX.md" || fail "fenced code block truncated the section summary"
-if grep -Fq "围栏内的日志" "$kb_parse/AI_SUMMARY_INDEX.md"; then
-  fail "fenced code content leaked into the summary"
+grep -Fq "围栏内的日志" "$kb_parse/AI_SUMMARY_INDEX.md" || fail "fenced evidence should be kept in the summary"
+if grep -Fq '^## 这不是标题' "$kb_parse/AI_SUMMARY_INDEX.md"; then
+  fail "a heading inside a fence leaked as a section"
 fi
-pass "多行 YAML 列表与代码围栏解析"
+pass "多行 YAML 列表与代码围栏解析（围栏内容作为证据保留）"
 
 # ---------------------------------------------------------------- P2-8 标记异常
 kb_marker="$tmp/kb-marker"
@@ -341,7 +342,7 @@ kb_pipe="$tmp/kb-pipe"
 sed -i.bak 's/^status: draft/status: solved/' "$kb_pipe"/records/2099/2099-12-12-001-pipe-title.md
 rm -f "$kb_pipe"/records/2099/*.bak
 doctor_pipe_out="$("$DOCTOR" "$kb_pipe" 2>&1 || true)"
-if ! printf '%s' "$doctor_pipe_out" | grep -Fq "status differs"; then
+if ! printf '%s' "$doctor_pipe_out" | grep -Fq "differs from record front matter"; then
   printf '%s\n' "$doctor_pipe_out" >&2
   printf 'INDEX row: %s\n' "$(grep '2099-12-12' "$kb_pipe/INDEX.md" || true)" >&2
   printf 'Record status: %s\n' "$(grep -m1 '^status:' "$kb_pipe"/records/2099/*.md || true)" >&2
@@ -725,5 +726,125 @@ set -e
 grep -Fq "记录已保存" "$tmp/partial.err" || fail "partial new did not report the saved record"
 grep -Fq "（ID " "$tmp/partial.err" || fail "partial new did not include the record id"
 pass "新建部分失败时给出保存位置与恢复命令"
+
+
+# ---------------------------------------------------------------- v0.8.2 回归
+# R01 同一行/行内 marker 不得覆盖手工复盘
+kb_same="$tmp/kb-same-marker"
+"$PSR" init "$kb_same" >/dev/null
+mkdir -p "$kb_same/records/2026" "$kb_same/reviews"
+printf -- '---\nid: 2026-10-21-001\ntitle: "复盘"\ndate: 2026-10-21\nstatus: solved\n---\n\n# 复盘\n' > "$kb_same/records/2026/2026-10-21-001-r.md"
+printf '# 手工说明\n\n这行解释 <!-- PSR:BEGIN REVIEW --> 与 <!-- PSR:END REVIEW --> 的用法。\n\nSAME_LINE_SENTINEL\n' > "$kb_same/reviews/2026-10-21.md"
+cp "$kb_same/reviews/2026-10-21.md" "$tmp/same-before"
+set +e
+PROBLEM_SOLUTION_KB_ROOT="$kb_same" "$PSR" review --day 2026-10-21 >/dev/null 2>&1
+same_rc=$?
+set -e
+[[ "$same_rc" -ne 0 ]] || fail "review overwrote a file whose markers are on the same line"
+cmp -s "$tmp/same-before" "$kb_same/reviews/2026-10-21.md" || fail "review modified a same-line-marker file"
+grep -Fq "SAME_LINE_SENTINEL" "$kb_same/reviews/2026-10-21.md" || fail "same-line review lost hand-written content"
+pass "复盘拒绝同一行/行内 marker，原文件不变"
+
+# R02 回收者中断留下的 .reclaim 不能永久阻塞
+kb_reclaim="$tmp/kb-reclaim"
+mkdir -p "$kb_reclaim/.psr.lock" "$kb_reclaim/.psr.lock.reclaim"
+printf '999999\n' > "$kb_reclaim/.psr.lock/pid"
+printf '888888\n' > "$kb_reclaim/.psr.lock.reclaim/pid"
+touch -t 200001010000 "$kb_reclaim/.psr.lock" "$kb_reclaim/.psr.lock.reclaim"
+if ! bash -c '. "$1/scripts/lib/lock.sh"; psr_lock_acquire "$2" 5 && psr_lock_release "$2"' _ "$SKILL_DIR" "$kb_reclaim"; then
+  fail "a crashed reclaimer's .reclaim marker blocked the lock forever"
+fi
+pass "回收标记中断后仍能恢复写入"
+
+# R03 校验必须在锁内：等待期间内容变空不能归档
+kb_race="$tmp/kb-lock-race"
+"$PSR" init "$kb_race" >/dev/null
+mkdir -p "$kb_race/records/2026"
+printf -- '---\nid: 2026-10-21-001\ntitle: "竞态"\ndate: 2026-10-21\nstatus: draft\n---\n\n# 竞态\n\n## 根因分析\n\n真实根因。\n\n## 最终解决方案\n\n真实方案。\n\n## 验证方法\n\n20 次通过。\n' > "$kb_race/records/2026/2026-10-21-001-race.md"
+cat > "$tmp/race-holder.sh" <<RACEHOLDER
+#!/usr/bin/env bash
+set -euo pipefail
+. "$SKILL_DIR/scripts/lib/lock.sh"
+psr_lock_acquire "$kb_race" 100
+sleep 0.6
+LC_ALL=C awk '
+  /^## (根因分析|最终解决方案|验证方法)$/ { print; in_sec = 1; next }
+  in_sec && NF { print "待填写。"; in_sec = 0; next }
+  { print }
+' "$kb_race/records/2026/2026-10-21-001-race.md" > "$kb_race/records/2026/.race.tmp"
+mv "$kb_race/records/2026/.race.tmp" "$kb_race/records/2026/2026-10-21-001-race.md"
+sleep 0.6
+psr_lock_release "$kb_race"
+RACEHOLDER
+chmod +x "$tmp/race-holder.sh"
+"$tmp/race-holder.sh" & race_holder=$!
+for _ in $(seq 1 200); do [[ -f "$kb_race/.psr.lock/pid" ]] && break; sleep 0.02; done
+set +e
+PROBLEM_SOLUTION_KB_ROOT="$kb_race" "$PSR" finalize 2026-10-21-001 --status solved >/dev/null 2>&1
+race_rc=$?
+set -e
+wait "$race_holder"
+[[ "$race_rc" -ne 0 ]] || fail "finalize archived content that became empty while waiting for the lock"
+grep -q '^status: draft' "$kb_race/records/2026/2026-10-21-001-race.md" || fail "finalize changed status despite failing validation"
+pass "finalize 在写锁内重新校验，等待期间变空则拒绝"
+
+# R04 多行注释与 ~~~ 围栏不能算有效内容
+kb_fence="$tmp/kb-fence"
+"$PSR" init "$kb_fence" >/dev/null
+mkdir -p "$kb_fence/records/2026"
+mk_fence() {
+  printf -- '---\nid: %s\ntitle: "%s"\ndate: 2026-10-21\nstatus: draft\n---\n\n# %s\n\n## 根因分析\n\n%s\n\n## 最终解决方案\n\n%s\n\n## 验证方法\n\n%s\n' "$1" "$2" "$2" "$3" "$4" "$5" > "$kb_fence/records/2026/$1-$2.md"
+}
+mk_fence 2026-10-21-001 comments '<!--
+待填写。
+-->' '真实方案。' '真实验证。'
+set +e
+PROBLEM_SOLUTION_KB_ROOT="$kb_fence" "$PSR" finalize 2026-10-21-001 --status solved >/dev/null 2>&1
+c_rc=$?
+set -e
+[[ "$c_rc" -ne 0 ]] || fail "a multi-line HTML comment counted as content"
+mk_fence 2026-10-21-002 tilde '真实根因。' '~~~bash
+# 验证命令
+~~~' '真实验证。'
+set +e
+PROBLEM_SOLUTION_KB_ROOT="$kb_fence" "$PSR" finalize 2026-10-21-002 --status solved >/dev/null 2>&1
+t_rc=$?
+set -e
+[[ "$t_rc" -ne 0 ]] || fail "a comment-only ~~~ fence counted as content"
+mk_fence 2026-10-21-003 real '真实根因。' '~~~bash
+systemctl restart app
+~~~' '~~~text
+ok 20/20
+~~~'
+PROBLEM_SOLUTION_KB_ROOT="$kb_fence" "$PSR" finalize 2026-10-21-003 --status solved >/dev/null || fail "real fenced evidence was rejected"
+pass "多行注释与 ~~~ 围栏：占位拒绝、真实证据接受"
+
+# R05 补漏索引行使用记录日期与元数据
+kb_fill="$tmp/kb-fill-row"
+"$PSR" init "$kb_fill" >/dev/null
+mkdir -p "$kb_fill/records/2026"
+printf -- '---\nid: 2026-10-21-001\ntitle: "补行"\ndate: 2026-10-21\nstatus: draft\ntools: [codex]\ntags: [mcp, debug]\n---\n\n# 补行\n\n## 根因分析\n\n真实根因。\n\n## 最终解决方案\n\n真实方案。\n\n## 验证方法\n\n通过。\n' > "$kb_fill/records/2026/2026-10-21-001-fill.md"
+PROBLEM_SOLUTION_KB_ROOT="$kb_fill" "$PSR" finalize 2026-10-21-001 --status solved >/dev/null
+grep -Eq '^\| 2026-10-21 \| 补行 \| solved \| codex \| mcp, debug \|' "$kb_fill/INDEX.md" || fail "inserted index row lost record date/tools/tags"
+pass "补漏索引行保留记录日期、工具与标签"
+
+# R06 空库与删除最后一条记录后的重建
+kb_rebuild="$tmp/kb-rebuild-empty"
+"$PSR" init "$kb_rebuild" >/dev/null
+PROBLEM_SOLUTION_KB_ROOT="$kb_rebuild" "$PSR" index --rebuild >/dev/null || fail "rebuild failed on an empty knowledge base"
+mkdir -p "$kb_rebuild/records/2026"
+printf -- '---\nid: 2026-10-21-001\ntitle: "临时"\ndate: 2026-10-21\nstatus: solved\n---\n\n# 临时\n\n## 根因分析\n\n根因。\n' > "$kb_rebuild/records/2026/2026-10-21-001-tmp.md"
+PROBLEM_SOLUTION_KB_ROOT="$kb_rebuild" "$PSR" index --rebuild >/dev/null
+rm "$kb_rebuild/records/2026/2026-10-21-001-tmp.md"
+set +e
+PROBLEM_SOLUTION_KB_ROOT="$kb_rebuild" "$PSR" index --rebuild >/dev/null 2>&1
+rebuild_rc=$?
+set -e
+[[ "$rebuild_rc" -ne 0 ]] || fail "rebuild silently dropped the last index row"
+PROBLEM_SOLUTION_KB_ROOT="$kb_rebuild" "$PSR" index --rebuild --allow-empty >/dev/null || fail "--allow-empty rebuild failed"
+if grep -qE '^\|[[:space:]]*[0-9]{4}-[0-9]{2}-[0-9]{2}' "$kb_rebuild/INDEX.md"; then
+  fail "--allow-empty left stale rows in INDEX.md"
+fi
+pass "空库可重建；删除最后一条需 --allow-empty"
 
 printf '[ok] smoke test passed\n'

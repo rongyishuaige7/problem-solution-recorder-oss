@@ -159,7 +159,7 @@ fi
 # 进程替换里的读取失败不会传回主流程，旧实现因此会在解析出错时覆盖索引并返回成功。
 if [[ ${#files[@]} -gt 0 ]]; then
   set +e
-  LC_ALL=C awk -v root="$root" -v maxlines=3 -f "$PARSER" "${files[@]}" > "$stream" 2> "$awk_err"
+  LC_ALL=C awk -v root="$root" -v maxlines=6 -f "$PARSER" "${files[@]}" > "$stream" 2> "$awk_err"
   awk_rc=$?
   set -e
 

@@ -49,7 +49,8 @@ Usage:
                                        Search records; literal by default
   psr review [--week YYYY-Www|--month YYYY-MM|--day YYYY-MM-DD] [--dry-run]
   psr review --open                    List unfinished follow-ups across all records
-  psr index [--rebuild] [--web]        Refresh the summary index (and INDEX.md / web data)
+  psr index [--rebuild] [--web] [--allow-empty]
+                                       Refresh the summary index (and INDEX.md / web data)
   psr --version
 
 Legacy commands (scripts/qs in a knowledge base) keep working; both use the same
@@ -333,26 +334,49 @@ section_has_content() {
       if (length(line) >= 3 && substr(line, length(line) - 2) == "：") return 1
       return 0
     }
-    BEGIN { in_fence = 0 }
+    BEGIN { in_fence = 0; fence = ""; in_comment = 0 }
     $0 == "## " h { s = 1; next }
-    s && /^## / { exit }
-    s && /^```/ { in_fence = !in_fence; next }
-    s && in_fence {
-      line = $0
-      sub(/^[[:space:]]+/, "", line)
-      sub(/[[:space:]]+$/, "", line)
-      if (line ~ /^#/) next
-      # 只有括号/逗号的骨架行不算内容。
-      if (line ~ /^[{}[\],;]+$/) next
-      if (placeholder(line)) next
-      found = 1
-      exit
-    }
     s {
       line = $0
+
+      # 多行 HTML 注释：整段忽略（含跨行）。
+      if (in_comment) {
+        if (index(line, "-->") > 0) in_comment = 0
+        next
+      }
+      if (match(line, /^[[:space:]]*<!--/)) {
+        rest = substr(line, RSTART + RLENGTH)
+        if (index(rest, "-->") == 0) in_comment = 1
+        next
+      }
+
+      # 两种围栏（``` 与 ~~~）：围栏内的 ## 不是章节边界。
+      if (match(line, /^[[:space:]]*(```|~~~)/)) {
+        m = substr(line, RSTART + RLENGTH - 3, 3)
+        if (!in_fence) {
+          in_fence = 1
+          fence = m
+        } else if (m == fence) {
+          in_fence = 0
+          fence = ""
+        }
+        next
+      }
+
+      if (!in_fence && line ~ /^## /) exit
+
+      if (in_fence) {
+        sub(/^[[:space:]]+/, "", line)
+        sub(/[[:space:]]+$/, "", line)
+        if (line ~ /^#/) next
+        if (line ~ /^[{}[\].,;]+$/) next
+        if (placeholder(line)) next
+        found = 1
+        exit
+      }
+
       gsub(/^[[:space:]*-]+/, "", line)
       gsub(/[[:space:]]+$/, "", line)
-      if (line ~ /^<!--.*-->$/) next
       if (placeholder(line)) next
       found = 1
       exit
@@ -395,6 +419,45 @@ fm_value() {
       sub("^" k ":[[:space:]]*", "")
       gsub(/^"|"$/, "")
       print
+      exit
+    }
+  ' "$file"
+}
+
+# 读取 front matter 的列表字段（行内数组或块列表），输出 "a, b"。
+fm_list_value() {
+  local file="$1"
+  local key="$2"
+  LC_ALL=C awk -v k="$key" '
+    NR == 1 && $0 == "---" { fm = 1; next }
+    fm && $0 == "---" { exit }
+    fm && index($0, k ":") == 1 {
+      v = substr($0, length(k) + 2)
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", v)
+      if (v ~ /^\[.*\]$/) {
+        v = substr(v, 2, length(v) - 2)
+        n = split(v, p, ",")
+        out = ""
+        for (i = 1; i <= n; i++) {
+          s = p[i]
+          gsub(/^[[:space:]]+|[[:space:]]+$/, "", s)
+          gsub(/^"|"$/, "", s)
+          if (s != "") out = out (out == "" ? "" : ", ") s
+        }
+        print out
+        exit
+      }
+      if (v != "") { print v; exit }
+      while ((getline line) > 0) {
+        if (line ~ /^---/) break
+        if (line ~ /^[[:space:]]*-[[:space:]]+/) {
+          s = line
+          sub(/^[[:space:]]*-[[:space:]]+/, "", s)
+          gsub(/^"|"$/, "", s)
+          out = out (out == "" ? "" : ", ") s
+        } else if (line ~ /^[A-Za-z0-9_-]+:/) break
+      }
+      print out
       exit
     }
   ' "$file"
@@ -495,6 +558,20 @@ cmd_finalize() {
     exit 2
   fi
 
+  # 归档必须在同一把写锁内完成定位、校验与写入：否则等待锁期间
+  # 记录可能被改成空内容，先前的校验结果就失效了（dry-run 保持只读）。
+  if [[ "$dry_run" -eq 0 ]]; then
+    # shellcheck source=/dev/null
+    . "$LIB/lock.sh"
+    # shellcheck source=/dev/null
+    . "$LIB/index.sh"
+    # trap 在函数返回后执行，必须用全局变量而不是 local root。
+    PSR_LOCK_ROOT="$root"
+    trap 'psr_lock_release "$PSR_LOCK_ROOT"' EXIT
+    trap 'psr_lock_release "$PSR_LOCK_ROOT"; exit 130' INT TERM HUP
+    psr_lock_acquire "$root" || die "获取写锁失败"
+  fi
+
   local matches=() list
   list="$(mktemp "${TMPDIR:-/tmp}/psr-finalize.XXXXXX")"
   if ! psr_list_records "$root/records" "$list"; then
@@ -572,17 +649,6 @@ cmd_finalize() {
     return 0
   fi
 
-  # ---- 加锁后写入 ----
-  # shellcheck source=/dev/null
-  . "$LIB/lock.sh"
-  # shellcheck source=/dev/null
-  . "$LIB/index.sh"
-  # trap 在函数返回后执行，必须用全局变量而不是 local root。
-  PSR_LOCK_ROOT="$root"
-  trap 'psr_lock_release "$PSR_LOCK_ROOT"' EXIT
-  trap 'psr_lock_release "$PSR_LOCK_ROOT"; exit 130' INT TERM HUP
-  psr_lock_acquire "$root" || die "获取写锁失败"
-
   local index="$root/INDEX.md"
   local schema label old_cell new_row row_fields
   schema="$(psr_index_schema "$index")"
@@ -612,7 +678,12 @@ cmd_finalize() {
       fi
     fi
   else
-    new_row="$(psr_index_row "$schema" "$id" "$(date +%F)" "$title" "-" "-" "$label" "待补充" "$rel")"
+    local rec_date rec_tools rec_tags
+    rec_date="$(fm_value "$file" date)"
+    [[ -n "$rec_date" ]] || rec_date="$(basename "$file" | cut -c1-10)"
+    rec_tools="$(fm_list_value "$file" tools)"
+    rec_tags="$(fm_list_value "$file" tags)"
+    new_row="$(psr_index_row "$schema" "$id" "$rec_date" "$title" "${rec_tools:--}" "${rec_tags:--}" "$label" "待补充" "$rel")"
     psr_index_insert "$index" "$new_row" "$id"
     index_note="已补入索引"
   fi
@@ -707,11 +778,13 @@ refresh_web() {
 cmd_index() {
   local rebuild=0
   local web=0
+  local allow_empty=0
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --rebuild) rebuild=1; shift ;;
       --web) web=1; shift ;;
+      --allow-empty) allow_empty=1; shift ;;
       -h|--help) usage; exit 0 ;;
       *) die "多余的参数: $1" ;;
     esac
@@ -721,7 +794,9 @@ cmd_index() {
   root="$(require_root)"
 
   if [[ "$rebuild" -eq 1 ]]; then
-    "$SCRIPTS/rebuild-index.sh" "$root" || die "重建索引失败"
+    local args=("$root")
+    [[ "$allow_empty" -eq 1 ]] && args+=(--allow-empty)
+    "$SCRIPTS/rebuild-index.sh" "${args[@]}" || die "重建索引失败"
   fi
   "$SCRIPTS/update-ai-summary-index.sh" "$root" || die "更新摘要索引失败"
   if [[ "$web" -eq 1 ]]; then
@@ -933,7 +1008,8 @@ cmd_search() {
         printf "\n"
         if (draft) printf "   状态: 草稿（未验证，不建议直接采用）\n"
         printf "   命中: %s\n", r_why[i]
-        if (r_verify[i] != "") printf "   验证: %s\n", substr(r_verify[i], 1, 120)
+        # 不在这里按字节截断：LC_ALL=C 下会切坏多字节字符。
+        if (r_verify[i] != "") printf "   验证: %s\n", r_verify[i]
         printf "   来源: %s\n\n", r_rel[i]
       }
       if (n == 0) printf "没有结果\n"
@@ -1209,18 +1285,30 @@ cmd_review() {
 
   mkdir -p "$root/reviews"
 
-  local begin_count=0 end_count=0 begin_line=0 end_line=0
+  # 计数必须与替换一致：只有“独占整行”的 marker 才算有效；
+  # 行内出现 marker 文本（例如说明文字里引用）走拒绝分支。
+  local sub_begin=0 sub_end=0 begin_count=0 end_count=0 begin_line=0 end_line=0
   if [[ -f "$file" ]]; then
-    begin_count="$(grep -c -F "$begin" "$file" || true)"
-    end_count="$(grep -c -F "$endm" "$file" || true)"
-    begin_line="$(grep -n -F "$begin" "$file" | head -n 1 | cut -d: -f1 || true)"
-    end_line="$(grep -n -F "$endm" "$file" | head -n 1 | cut -d: -f1 || true)"
+    sub_begin="$(grep -c -F "$begin" "$file" || true)"
+    sub_end="$(grep -c -F "$endm" "$file" || true)"
+    begin_count="$(grep -c -x -F "$begin" "$file" || true)"
+    end_count="$(grep -c -x -F "$endm" "$file" || true)"
+    begin_line="$(grep -n -x -F "$begin" "$file" | head -n 1 | cut -d: -f1 || true)"
+    end_line="$(grep -n -x -F "$endm" "$file" | head -n 1 | cut -d: -f1 || true)"
   fi
 
   local tmp backup=""
   tmp="$(mktemp "${TMPDIR:-/tmp}/psr-review.XXXXXX")"
 
-  if [[ -f "$file" && "$begin_count" -eq 1 && "$end_count" -eq 1 && -n "$begin_line" && -n "$end_line" && "$begin_line" -lt "$end_line" ]]; then
+  if [[ ! -f "$file" || ! -s "$file" ]]; then
+    # 新文件（或空文件）：直接写生成区。
+    {
+      printf '%s\n\n%s\n' "$begin" "$generated"
+      printf '%s\n\n' "$endm"
+      printf '## 手工笔记\n\n'
+      printf '本区在重新生成复盘时保留，可自由编辑。\n'
+    } > "$tmp"
+  elif [[ "$begin_count" -eq 1 && "$end_count" -eq 1 && -n "$begin_line" && -n "$end_line" && "$begin_line" -lt "$end_line" ]]; then
     local current newblock
     current="$(awk -v b="$begin" -v e="$endm" '$0 == b { f = 1 } f { print } $0 == e { f = 0 }' "$file" | LC_ALL=C awk '/^生成时间：/ { print "生成时间：X"; next } { print }')"
     newblock="$( { printf '%s\n\n%s\n' "$begin" "$generated"; printf '%s\n' "$endm"; } | LC_ALL=C awk '/^生成时间：/ { print "生成时间：X"; next } { print }')"
@@ -1235,7 +1323,7 @@ cmd_review() {
       printf '%s\n' "$endm"
       awk -v b="$begin" -v e="$endm" 'f { print } $0 == e { f = 1 }' "$file"
     } > "$tmp"
-  elif [[ -f "$file" && "$begin_count" -eq 0 && "$end_count" -eq 0 && -s "$file" ]]; then
+  elif [[ "$sub_begin" -eq 0 && "$sub_end" -eq 0 ]]; then
     # 纯手写的历史复盘：先备份，再把旧内容整段保留，绝不直接覆盖。
     backup="${file}.pre-marker.$(date +%Y%m%d%H%M%S).bak"
     cp -p "$file" "$backup"
@@ -1246,19 +1334,15 @@ cmd_review() {
       printf '以下内容来自没有生成标记的旧文件，已原样保留。\n\n'
       cat "$backup"
     } > "$tmp"
-  elif [[ -f "$file" && -s "$file" && ( "$begin_count" -ne 1 || "$end_count" -ne 1 || "$begin_line" -gt "$end_line" ) ]]; then
-    printf '[fail] %s 的生成标记异常（begin=%s, end=%s），未写入。\n' \
-      "$file" "$begin_count" "$end_count" >&2
-    printf '请手工修正为各一个，且 BEGIN 在 END 之前；原文件未改动。\n' >&2
+  else
+    # 其余情况一律拒绝：同一行、行内引用、重复、顺序反转等。
+    printf '[fail] %s 的生成标记异常，未写入。\n' "$file" >&2
+    printf '  独占整行的 BEGIN：%s 个（行号 %s）\n' "$begin_count" "${begin_line:-无}" >&2
+    printf '  独占整行的 END：%s 个（行号 %s）\n' "$end_count" "${end_line:-无}" >&2
+    printf '要求各一个、独占整行，且 BEGIN 严格早于 END；原文件未改动。\n' >&2
+    printf '如需迁移旧文件，请先删掉所有 marker 行再重试（会备份原文件）。\n' >&2
     rm -f "$tmp"
     exit 1
-  else
-    {
-      printf '%s\n\n%s\n' "$begin" "$generated"
-      printf '%s\n\n' "$endm"
-      printf '## 手工笔记\n\n'
-      printf '本区在重新生成复盘时保留，可自由编辑。\n'
-    } > "$tmp"
   fi
 
   mv "$tmp" "$file"

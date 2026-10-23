@@ -83,9 +83,25 @@ psr_lock_acquire() {
     fi
 
     if [[ -d "$lock" ]]; then
+      # 回收者崩溃留下的标记会永久阻塞回收：所有者已死或标记过旧时清理。
+      if [[ -d "$reclaim" ]]; then
+        local rpid="" rage=0
+        if [[ -f "$reclaim/pid" ]]; then
+          rpid="$(cat "$reclaim/pid" 2>/dev/null || true)"
+        fi
+        rage=$(( $(date +%s) - $(psr_lock_mtime "$reclaim") ))
+        [[ "$rage" -lt 0 ]] && rage=0
+        if [[ -n "$rpid" ]] && ! kill -0 "$rpid" 2>/dev/null; then
+          rm -rf "$reclaim" 2>/dev/null || true
+        elif [[ "$rage" -gt 60 ]]; then
+          rm -rf "$reclaim" 2>/dev/null || true
+        fi
+      fi
+
       if psr_lock_is_stale "$lock"; then
         # 只有拿到 .reclaim 的进程可以回收；其他进程继续等待。
         if mkdir "$reclaim" 2>/dev/null; then
+          printf '%s\n' "$$" > "$reclaim/pid" 2>/dev/null || true
           if [[ -n "${PSR_LOCK_TEST_PAUSE:-}" ]]; then
             # 仅用于回归测试固定交错窗口；默认不生效。
             sleep "$PSR_LOCK_TEST_PAUSE"
@@ -95,7 +111,7 @@ psr_lock_acquire() {
             printf 'Removing stale lock: %s\n' "$lock" >&2
             rm -rf "$lock" 2>/dev/null || true
           fi
-          rmdir "$reclaim" 2>/dev/null || true
+          rm -rf "$reclaim" 2>/dev/null || true
         fi
 
         waited=$(( waited + 1 ))
@@ -108,14 +124,6 @@ psr_lock_acquire() {
         continue
       fi
 
-      # 回收者崩溃后留下的标记：超过 60s 允许任意等待者清理，避免永久卡死。
-      if [[ -d "$reclaim" ]]; then
-        local reclaim_age
-        reclaim_age=$(( $(date +%s) - $(psr_lock_mtime "$reclaim") ))
-        if [[ "$reclaim_age" -gt 60 ]]; then
-          rmdir "$reclaim" 2>/dev/null || true
-        fi
-      fi
     fi
 
     sleep 0.2

@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-10-23
+
+### Fixed
+
+- Review marker handling now uses whole-line matches everywhere: a file whose markers
+  sit on the same line, appear inline in prose, repeat, or are reversed is refused with
+  the counts and line numbers; only a valid pair (one each, BEGIN strictly before END)
+  is refreshed, and a file without any marker text is migrated with a backup.
+- A crashed reclaimer's `<lock>.reclaim` no longer blocks writers forever: the marker
+  records its owner, and a dead owner or a marker older than 60s is cleaned before the
+  stale lock is reclaimed.
+- `finalize` locates, validates and writes inside the same write lock, so content that
+  becomes empty while waiting is rejected instead of archived; `--dry-run` stays
+  read-only.
+- Section validation understands multi-line HTML comments and both ``` and ~~~ fences;
+  a comment-only block no longer counts as content, while real commands and output do.
+- An index row inserted by `finalize` uses the record's date, tools and tags; `doctor`
+  now also reports INDEX/record date mismatches.
+- `rebuild-index.sh --allow-empty` (and `psr index --rebuild --allow-empty`) rebuilds an
+  empty index; without the flag, dropping existing rows is refused with a hint.
+- The record parser keeps fenced content as evidence (a `##` inside a fence still never
+  starts a section), so verification blocks appear in the summary and the web data.
+- `psr search` no longer byte-truncates the verification excerpt under `LC_ALL=C`.
+
+### Changed
+
+- Web data is record-authoritative: an existing-but-empty section or `tags: []` stays
+  empty instead of falling back to a stale summary entry; `search_text` and separate
+  conclusion/signature fields keep CLI and page search scopes aligned.
+- `bin/web-check` compares tags and body-field presence against the canonical parser, so
+  a generator that silently falls back to stale summary content is reported instead of
+  self-certifying.
+- The dashboard shows which fields matched on each card when a query is active.
+- Narrow layouts no longer inherit a 505px minimum width: the shell/content grids use
+  `minmax(0, 1fr)` and long tokens wrap, so a 390px viewport renders at 390px.
+- A knowledge base's `qs new` reports Web sync failures as partial success (exit 2) and
+  no longer prints “已同步” when generation failed.
+
+
 ## [0.8.1] - 2026-10-22
 
 ### Fixed
@@ -280,7 +319,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `agents/*.yaml` metadata for multiple runtimes.
 - GitHub Actions workflow for validation and smoke tests.
 
-[Unreleased]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.2...HEAD
+[0.8.2]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.6.0...v0.7.0

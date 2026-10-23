@@ -21,7 +21,8 @@
 #   - Inline arrays (`tools: ["a", "b"]`) and multi-line lists
 #     (`tools:` followed by `  - a`) are both flattened to `a, b`.
 #   - Section text starts at `## <heading>` and stops at the next `## `.
-#   - Lines inside ``` or ~~~ fences are ignored.
+#   - Lines inside ``` or ~~~ fences are kept as content (they are often the
+#     verification evidence), but a "##" inside a fence never starts a section.
 #   - Table rows (starting with `|`) are ignored; bullets and numbering are stripped.
 #   - Each section keeps at most `maxlines` (default 3) lines.
 #   - Values are never truncated here; callers apply their own length limits.
@@ -33,6 +34,19 @@ function warn(key, reason) {
 function emit(k, v) {
   gsub(/\t/, " ", v)
   print "@F\t" k "\t" v
+}
+
+# 把一行正文并入当前章节；围栏内外共用同一套规则。
+function add_line(raw,   line, key) {
+  if (section == "") return
+  key = map[section]
+  if (key == "") return
+  line = strip_line(raw)
+  if (line == "" || line ~ /^\|/) return
+  if (count >= maxlines) return
+  out = (out == "" ? line : out "; " line)
+  if (key == "follow") items = (items == "" ? line : items "\036" line)
+  count++
 }
 
 function flush_section(   key) {
@@ -136,7 +150,7 @@ fm {
 }
 
 /^[[:space:]]*(```|~~~)/ { fence = !fence; next }
-fence { next }
+fence { add_line($0); next }
 
 /^##[[:space:]]+/ {
   flush_section()
@@ -146,17 +160,7 @@ fence { next }
   next
 }
 
-{
-  if (section == "") next
-  key = map[section]
-  if (key == "") next
-  line = strip_line($0)
-  if (line == "" || line ~ /^\|/) next
-  if (count >= maxlines) next
-  out = (out == "" ? line : out "; " line)
-  if (key == "follow") items = (items == "" ? line : items "\036" line)
-  count++
-}
+{ add_line($0) }
 
 END {
   flush_section()

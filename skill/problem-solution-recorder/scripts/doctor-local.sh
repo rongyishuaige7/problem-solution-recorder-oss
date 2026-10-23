@@ -86,16 +86,17 @@ if [[ "$records_found" -gt 0 ]]; then
     cur_status=""
     emit_record_row() {
       [[ -n "$cur_rel" ]] || return 0
-      printf '%s\037%s\037%s\n' "${cur_id:-$cur_rel}" "$cur_rel" "${cur_status:-unknown}" >> "$records_file"
+      printf '%s\037%s\037%s\037%s\n' "${cur_id:-$cur_rel}" "$cur_rel" "${cur_status:-unknown}" "${cur_date:-}" >> "$records_file"
     }
     yaml_warnings=0
     while IFS=$'\t' read -r tag field value; do
       case "$tag" in
-        '@R') emit_record_row; cur_rel="$field"; cur_id=""; cur_status="" ;;
+        '@R') emit_record_row; cur_rel="$field"; cur_id=""; cur_status=""; cur_date="" ;;
         '@W') yaml_warnings=$(( yaml_warnings + 1 )) ;;
         '@F')
           case "$field" in
             id) cur_id="$value" ;;
+            date) cur_date="$value" ;;
             status) cur_status="$value" ;;
           esac
           ;;
@@ -178,6 +179,7 @@ if [[ -f "$index_path" ]]; then
         while ((getline line < recs) > 0) {
           n = split(line, p, "\037")
           status[p[2]] = p[3]
+          rdate[p[2]] = p[4]
         }
         close(recs)
       }
@@ -188,8 +190,9 @@ if [[ -f "$index_path" ]]; then
         if (row ~ /^\|[[:space:]]*Date[[:space:]]*\|/) { schema = 6; next }
         if (row !~ /^\|[[:space:]]*[0-9]{4}-[0-9]{2}-[0-9]{2}/) next
         n = split(row, f, "|")
-        if (schema == 7) { row_status = f[6]; link = f[8] } else { row_status = f[4]; link = f[7] }
+        if (schema == 7) { row_date = f[3]; row_status = f[6]; link = f[8] } else { row_date = f[2]; row_status = f[4]; link = f[7] }
         gsub(/^[[:space:]]+|[[:space:]]+$/, "", row_status)
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", row_date)
         mapped = machine(row_status)
         if (mapped == "") next
         if (!match(link, /\(([^)]+)\)/)) next
@@ -197,14 +200,17 @@ if [[ -f "$index_path" ]]; then
         if (rel in status && status[rel] != mapped) {
           printf "  - %s: INDEX=%s record=%s\n", rel, row_status, status[rel]
         }
+        if (rel in rdate && rdate[rel] != "" && row_date != rdate[rel]) {
+          printf "  - %s: INDEX date=%s record=%s\n", rel, row_date, rdate[rel]
+        }
       }
     ' "$index_path" 2>/dev/null || true)"
     if [[ -n "$mismatches" ]]; then
-      printf '[warn] INDEX.md status differs from record front matter:\n'
+      printf '[warn] INDEX.md differs from record front matter (status/date):\n'
       printf '%s\n' "$mismatches"
       warnings=$((warnings + 1))
     else
-      printf '[ok] INDEX.md status matches records\n'
+      printf '[ok] INDEX.md status and date match records\n'
     fi
 
     # 5) front matter 缺少 date（页面与索引会回退到文件名，容易掩盖问题）
