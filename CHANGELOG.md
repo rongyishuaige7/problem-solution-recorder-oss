@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-22
+
+### Added
+
+- `doctor-local.sh` reports records whose front matter lacks a `date` field, and runs
+  `bin/web-check` when a knowledge base ships one.
+
+### Changed
+
+- Knowledge base dashboard (in the KB repository, not this skill): URL-persisted search,
+  filters and selection; status filter covers draft/investigating; date-range filter;
+  zero-result state clears the detail pane and offers a reset button; generated time is a
+  real timestamp shown separately from record dates; all dynamic text is rendered with
+  DOM text nodes; keyboard selection (Up/Down/Enter/Space/Escape) and mobile detail
+  scrolling.
+- `bin/web-check` keeps `web/data.js` consistent with the canonical parser and rejects
+  tool/tag values containing brackets or quotes.
+
+### Fixed
+
+- One record used a `日期:` front-matter key instead of `date:`, which made the dashboard
+  and the canonical parser disagree; the record was repaired and the doctor now checks
+  for it.
+
+
 ## [0.7.0] - 2026-10-22
 
 ### Added
@@ -213,7 +238,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `agents/*.yaml` metadata for multiple runtimes.
 - GitHub Actions workflow for validation and smoke tests.
 
-[Unreleased]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.5.0...v0.5.1

@@ -190,7 +190,26 @@ if [[ -f "$index_path" ]]; then
       printf '[ok] INDEX.md status matches records\n'
     fi
 
-    # 5) 仍是占位内容的记录
+    # 5) front matter 缺少 date（页面与索引会回退到文件名，容易掩盖问题）
+    missing_date=""
+    for f in "${rec_files[@]}"; do
+      LC_ALL=C awk '
+        NR == 1 && $0 == "---" { fm = 1; next }
+        fm && $0 == "---" { exit }
+        fm && /^date:[[:space:]]*[0-9]/ { found = 1; exit }
+        END { exit(found ? 0 : 1) }
+      ' "$f" || missing_date="${missing_date}${f}
+"
+    done
+    if [[ -n "$missing_date" ]]; then
+      printf '[warn] records missing a date field:\n'
+      printf '%s' "$missing_date" | sed '/^$/d; s|^|  - |'
+      warnings=$((warnings + 1))
+    else
+      printf '[ok] every record has a date field\n'
+    fi
+
+    # 6) 仍是占位内容的记录
     placeholders="$(LC_ALL=C awk '
       FNR == 1 { section = 0 }
       /^##[[:space:]]+一句话结论/ { section = 1; empty = 1; next }
@@ -210,6 +229,17 @@ if [[ -f "$index_path" ]]; then
       printf '[ok] no placeholder conclusions\n'
     fi
   fi
+fi
+
+if [[ -x "$root/bin/web-check" ]]; then
+  printf '[ok] bin/web-check\n'
+  if command -v node >/dev/null 2>&1; then
+    "$root/bin/web-check" >/dev/null 2>&1 || failures=$((failures + 1))
+  else
+    printf '[info] node not found; web data consistency not verified\n'
+  fi
+else
+  printf '[info] bin/web-check not found (optional web dashboard check)\n'
 fi
 
 if [[ -x "$root/bin/qs" ]]; then
