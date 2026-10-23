@@ -2,6 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$( ( unset CDPATH; cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd -P ) )"
+SKILL_DIR="$( ( unset CDPATH; cd -P -- "$SCRIPT_DIR/.." >/dev/null 2>&1 && pwd -P ) )"
 RESOLVE="$SCRIPT_DIR/resolve-kb-root.sh"
 
 usage() {
@@ -17,6 +18,7 @@ Writes:
   <kb>/bin/lib/ids.sh
   <kb>/bin/lib/index.sh
   <kb>/bin/lib/secrets.sh
+  <kb>/bin/lib/enumerate.sh
 
 The `psr` CLI stays in the skill (install it with `install.sh --bin`); a knowledge
 base keeps `bin/qs` for standalone use.
@@ -49,7 +51,7 @@ root="$("$RESOLVE" "$root_arg")"
 dest="$root/bin/lib"
 
 drift=0
-for file in record-fields.awk lock.sh ids.sh index.sh secrets.sh; do
+for file in record-fields.awk lock.sh ids.sh index.sh secrets.sh enumerate.sh; do
   src="$SCRIPT_DIR/lib/$file"
   [[ -f "$src" ]] || {
     printf 'Missing skill library: %s\n' "$src" >&2
@@ -70,6 +72,27 @@ for file in record-fields.awk lock.sh ids.sh index.sh secrets.sh; do
   mkdir -p "$dest"
   cp "$src" "$dest/$file"
   printf '[synced] %s\n' "$dest/$file"
+done
+
+# 共享脚本：知识库内的 qs 与 skill 生成同一种摘要格式。
+for script in update-ai-summary-index.sh resolve-kb-root.sh; do
+  src="$SKILL_DIR/scripts/$script"
+  dst="$root/bin/$script"
+  if [[ "$check_only" -eq 1 ]]; then
+    if [[ ! -f "$dst" ]]; then
+      printf '[missing] %s\n' "$dst" >&2
+      drift=1
+    elif ! cmp -s "$src" "$dst"; then
+      printf '[drift] %s differs from %s\n' "$dst" "$src" >&2
+      drift=1
+    else
+      printf '[ok] %s\n' "$dst"
+    fi
+  else
+    cp "$src" "$dst"
+    chmod +x "$dst"
+    printf '[synced] %s\n' "$dst"
+  fi
 done
 
 if [[ "$check_only" -eq 1 && "$drift" -ne 0 ]]; then

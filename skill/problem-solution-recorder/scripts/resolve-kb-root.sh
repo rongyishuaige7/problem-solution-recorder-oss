@@ -12,8 +12,9 @@ Resolution order:
   1. explicit-path argument
   2. PROBLEM_SOLUTION_KB_ROOT
   3. .problem-solution-root in cwd or a parent directory
-  4. $XDG_CONFIG_HOME/problem-solution-recorder/root
-  5. ~/.config/problem-solution-recorder/root
+  4. the knowledge base that contains this script (vendored bin/)
+  5. $XDG_CONFIG_HOME/problem-solution-recorder/root
+  6. ~/.config/problem-solution-recorder/root
 
 --explain prints "<root>\t<source>" so callers can show where the
 configuration came from (env, marker:<file>, xdg:<file>, arg).
@@ -101,6 +102,14 @@ while :; do
   [[ "$dir" == "/" ]] && break
   dir="$(dirname "$dir")"
 done
+
+# 脚本随知识库分发时（<kb>/bin/…），优先管理它所在的知识库。
+script_dir="$( ( unset CDPATH; cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd -P ) )"
+self_root="$(dirname "$script_dir")"
+if [[ -f "$self_root/AI入口.md" && -f "$self_root/INDEX.md" ]]; then
+  emit "$self_root" "self"
+  exit 0
+fi
 
 config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
 for config_file in "$config_home/problem-solution-recorder/root" "$HOME/.config/problem-solution-recorder/root"; do

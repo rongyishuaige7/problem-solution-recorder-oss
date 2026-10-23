@@ -566,4 +566,164 @@ pass "复盘：周期记录、未完成/已完成分离、来源、幂等与手�
 
 unset PROBLEM_SOLUTION_KB_ROOT
 
+
+# ---------------------------------------------------------------- 可靠性回归（v0.8.1）
+# 1) 陈旧锁回收必须互斥
+kb_lock="$tmp/kb-lock"
+mkdir -p "$kb_lock"
+mkdir "$kb_lock/.psr.lock"
+printf '999999\n' > "$kb_lock/.psr.lock/pid"
+touch -t 200001010000 "$kb_lock/.psr.lock"
+cat > "$tmp/lock-holder.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+. "$1/scripts/lib/lock.sh"
+psr_lock_acquire "$2" 100 || exit 9
+sleep 1.2
+psr_lock_release "$2"
+EOF
+cat > "$tmp/lock-contender.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+. "$1/scripts/lib/lock.sh"
+if psr_lock_acquire "$2" 2; then
+  psr_lock_release "$2"
+  exit 0
+fi
+exit 1
+EOF
+chmod +x "$tmp/lock-holder.sh" "$tmp/lock-contender.sh"
+PSR_LOCK_TEST_PAUSE=2.0 "$tmp/lock-holder.sh" "$SKILL_DIR" "$kb_lock" & lock_holder_pid=$!
+# 等到回收者真正进入回收窗口再让竞争者尝试，避免用固定 sleep 赌调度。
+for _ in $(seq 1 500); do
+  [[ -d "$kb_lock/.psr.lock.reclaim" ]] && break
+  sleep 0.02
+done
+[[ -d "$kb_lock/.psr.lock.reclaim" ]] || fail "holder never took the reclaim marker"
+if "$tmp/lock-contender.sh" "$SKILL_DIR" "$kb_lock"; then
+  fail "contender entered while a stale lock was being reclaimed"
+fi
+wait "$lock_holder_pid"
+pass "陈旧锁回收互斥，回收窗口内其他写入者被阻塞"
+
+# 2) 不可读记录目录不得改写摘要
+if [[ "$(id -u)" -ne 0 ]]; then
+  kb_enum="$tmp/kb-enum"
+  "$PSR" init "$kb_enum" >/dev/null
+  mkdir -p "$kb_enum/records/2026"
+  printf -- '---\nid: 2026-10-21-001\ntitle: "枚举"\ndate: 2026-10-21\nstatus: solved\n---\n\n# 枚举\n\n## 根因分析\n\n真实根因。\n' > "$kb_enum/records/2026/2026-10-21-001-enum.md"
+  "$PSR" index >/dev/null
+  cp "$kb_enum/AI_SUMMARY_INDEX.md" "$tmp/enum-before"
+  chmod 000 "$kb_enum/records/2026"
+  set +e
+  "$SCRIPT_DIR/update-ai-summary-index.sh" "$kb_enum" >/dev/null 2>&1
+  enum_rc=$?
+  set -e
+  chmod 755 "$kb_enum/records/2026"
+  [[ "$enum_rc" -ne 0 ]] || fail "summary succeeded with an unreadable records directory"
+  cmp -s "$tmp/enum-before" "$kb_enum/AI_SUMMARY_INDEX.md" || fail "summary changed after an enumeration failure"
+  pass "目录枚举失败时摘要保持原样并返回非零"
+else
+  pass "目录枚举失败用例在 root 下跳过"
+fi
+
+# 3) 复盘：手写文件备份迁移、异常 marker 拒绝、遵守写锁
+kb_rev="$tmp/kb-review"
+"$PSR" init "$kb_rev" >/dev/null
+mkdir -p "$kb_rev/records/2026" "$kb_rev/reviews"
+printf -- '---\nid: 2026-10-21-001\ntitle: "复盘"\ndate: 2026-10-21\nstatus: solved\n---\n\n# 复盘\n\n## 后续事项\n\n- [ ] 跟进\n' > "$kb_rev/records/2026/2026-10-21-001-rev.md"
+printf '# 手写复盘\n\n哨兵 HAND-1\n' > "$kb_rev/reviews/2026-10-21.md"
+PROBLEM_SOLUTION_KB_ROOT="$kb_rev" "$PSR" review --day 2026-10-21 >/dev/null
+grep -Fq "HAND-1" "$kb_rev/reviews/2026-10-21.md" || fail "review dropped hand-written history"
+ls "$kb_rev/reviews/"*pre-marker*.bak >/dev/null 2>&1 || fail "review did not back up the pre-marker file"
+
+printf '<!-- PSR:END REVIEW -->\nX\n<!-- PSR:BEGIN REVIEW -->\n' > "$kb_rev/reviews/2026-10-21.md"
+cp "$kb_rev/reviews/2026-10-21.md" "$tmp/review-before"
+set +e
+PROBLEM_SOLUTION_KB_ROOT="$kb_rev" "$PSR" review --day 2026-10-21 >/dev/null 2>&1
+rev_rc=$?
+set -e
+[[ "$rev_rc" -ne 0 ]] || fail "review wrote into a file with reversed markers"
+cmp -s "$tmp/review-before" "$kb_rev/reviews/2026-10-21.md" || fail "review modified a file with reversed markers"
+
+mkdir -p "$kb_rev/.psr.lock"
+printf '%s\n' "$$" > "$kb_rev/.psr.lock/pid"
+set +e
+PROBLEM_SOLUTION_KB_ROOT="$kb_rev" PSR_LOCK_RETRIES=2 "$PSR" review --day 2026-10-21 >/dev/null 2>&1
+rev_lock_rc=$?
+set -e
+rm -rf "$kb_rev/.psr.lock"
+[[ "$rev_lock_rc" -ne 0 ]] || fail "review ignored an active write lock"
+pass "复盘：手写内容迁移备份、异常 marker 拒绝、遵守写锁"
+
+# 4) 未填写的完整模板不能归档
+kb_tpl_full="$tmp/kb-template-full"
+"$PSR" init "$kb_tpl_full" >/dev/null
+PROBLEM_SOLUTION_KB_ROOT="$kb_tpl_full" "$PSR" new "完整模板" --slug tpl >/dev/null
+tpl_id="$(basename "$(ls "$kb_tpl_full"/records/2026/*.md)" | sed -n -E 's/^([0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{3,})-.*/\1/p')"
+set +e
+PROBLEM_SOLUTION_KB_ROOT="$kb_tpl_full" "$PSR" finalize "$tpl_id" --status solved >/dev/null 2>"$tmp/tpl.err"
+tpl_rc=$?
+set -e
+[[ "$tpl_rc" -ne 0 ]] || fail "unedited full template was archived as solved"
+grep -Fq "模板原文" "$tmp/tpl.err" || fail "template rejection did not explain the reason"
+pass "完整模板未编辑时拒绝归档"
+
+# 5) 四位 ID、前缀拒绝、重复 ID
+kb_id="$tmp/kb-ids"
+"$PSR" init "$kb_id" >/dev/null
+mkdir -p "$kb_id/records/2026"
+printf -- '---\nid: 2026-10-21-1000\ntitle: "已存在"\ndate: 2026-10-21\nstatus: solved\n---\n\n# 已存在\n\n## 根因分析\n\n真实根因。\n' > "$kb_id/records/2026/2026-10-21-1000-old.md"
+id_out="$(PROBLEM_SOLUTION_KB_ROOT="$kb_id" "$PSR" new "四位序号" --date 2026-10-21 --slug four)"
+printf '%s' "$id_out" | grep -Fq "ID: 2026-10-21-1001" || fail "four-digit id was truncated in feedback"
+set +e
+PROBLEM_SOLUTION_KB_ROOT="$kb_id" "$PSR" finalize 2026 --status solved >/dev/null 2>&1
+prefix_rc=$?
+set -e
+[[ "$prefix_rc" -eq 2 ]] || fail "finalize accepted a year prefix (rc=$prefix_rc)"
+cp "$kb_id/records/2026/2026-10-21-1000-old.md" "$kb_id/records/2026/2026-10-21-1000-dup.md"
+set +e
+PROBLEM_SOLUTION_KB_ROOT="$kb_id" "$PSR" finalize 2026-10-21-1000 --status solved >/dev/null 2>&1
+dup_rc=$?
+set -e
+[[ "$dup_rc" -eq 1 ]] || fail "finalize did not refuse duplicate ids (rc=$dup_rc)"
+pass "ID 全程完整、前缀拒绝、重复 ID 拒绝"
+
+# 6) 六列索引保留标签；敏感检查失败返回非零
+kb_idx="$tmp/kb-index-tags"
+"$PSR" init "$kb_idx" >/dev/null
+mkdir -p "$kb_idx/records/2026"
+printf -- '---\nid: 2026-10-21-001\ntitle: "标签"\ndate: 2026-10-21\nstatus: draft\ntools: [codex]\ntags: [mcp, debug]\n---\n\n# 标签\n\n## 根因分析\n\n真实根因。\n\n## 最终解决方案\n\n真实方案。\n\n## 验证方法\n\n20 次通过。\n' > "$kb_idx/records/2026/2026-10-21-001-tags.md"
+cat > "$kb_idx/INDEX.md" <<'EOF'
+# 问题索引
+
+| Date | Title | Status | Tools | Tags | Record |
+| --- | --- | --- | --- | --- | --- |
+| 2026-10-21 | 标签 | draft | codex | mcp, debug | [records/2026/2026-10-21-001-tags.md](records/2026/2026-10-21-001-tags.md) |
+EOF
+PROBLEM_SOLUTION_KB_ROOT="$kb_idx" "$PSR" finalize 2026-10-21-001 --status solved >/dev/null
+grep -Fq "| mcp, debug |" "$kb_idx/INDEX.md" || fail "finalize replaced six-column tags with a placeholder"
+
+printf -- '---\nid: 2026-10-21-002\ntitle: "密钥"\ndate: 2026-10-21\nstatus: solved\n---\n\n# 密钥\n\n## 根因分析\n\n真实根因。\n\n## 最终解决方案\n\nsk-proj-abcdefghijklmnopqrstuvwx1234\n\n## 验证方法\n\n通过。\n' > "$kb_idx/records/2026/2026-10-21-002-secret.md"
+set +e
+PROBLEM_SOLUTION_KB_ROOT="$kb_idx" "$PSR" finalize 2026-10-21-002 --status solved >/dev/null 2>"$tmp/secret.err"
+secret_rc=$?
+set -e
+[[ "$secret_rc" -ne 0 ]] || fail "finalize returned success although the secret check failed"
+grep -Fq "敏感检查" "$tmp/secret.err" || fail "secret failure did not print a recovery hint"
+pass "六列标签保留；敏感检查失败时归档门禁返回非零"
+
+# 7) 摘要维护失败时仍报告已保存的记录
+kb_part="$tmp/kb-partial"
+"$PSR" init "$kb_part" >/dev/null
+printf '<!-- PSR:BEGIN GENERATED -->\nonly begin\n' > "$kb_part/AI_SUMMARY_INDEX.md"
+set +e
+PROBLEM_SOLUTION_KB_ROOT="$kb_part" "$PSR" new "部分失败" --slug partial >/dev/null 2>"$tmp/partial.err"
+part_rc=$?
+set -e
+[[ "$part_rc" -eq 3 ]] || fail "partial new returned $part_rc (expected 3)"
+grep -Fq "记录已保存" "$tmp/partial.err" || fail "partial new did not report the saved record"
+grep -Fq "（ID " "$tmp/partial.err" || fail "partial new did not include the record id"
+pass "新建部分失败时给出保存位置与恢复命令"
+
 printf '[ok] smoke test passed\n'

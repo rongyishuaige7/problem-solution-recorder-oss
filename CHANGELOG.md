@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-10-22
+
+### Fixed
+
+- Reclaiming a stale write lock is now mutual-exclusive: the reclaimer takes
+  `<lock>.reclaim` and re-checks the stale instance before deleting, so two reclaimers
+  can no longer delete each other's fresh lock and enter the critical section together.
+- Record enumeration failures (unreadable directory, `find` error) abort the summary,
+  index rebuild, doctor and `psr` reads instead of looking like an empty knowledge base;
+  derived files are left unchanged.
+- `psr review` takes the shared write lock, refuses files whose PSR markers are missing,
+  duplicated or reversed, and migrates pre-marker hand-written reviews to a timestamped
+  backup while preserving their content.
+- `finalize` rejects records that are still the unedited template and ignores HTML
+  comments, label-only lines, placeholder prose and comment-only fences when checking
+  section content.
+- `finalize` writes `status` only inside the front matter (inserting it when missing),
+  preserves six-column `Tags`, and reports record / INDEX / summary / Web / secret check
+  separately with exact paths.
+- A failed secret scan no longer reports success: findings exit 1, an unknown scan
+  result exits 2, both with masked locations and a recovery command.
+- Record IDs are handled end to end: four-digit sequences are printed in full, a year or
+  any prefix is rejected, and duplicate IDs are refused with the candidate paths.
+- `psr new` reports the saved path and ID even when the summary refresh fails (exit 3).
+- Search passes the query through the environment, so literal backslashes match
+  (Windows paths, escaped logs); long Chinese review text is no longer byte-truncated.
+- `doctor` accepts quoted dates, maps Chinese index labels before comparing status, and
+  de-duplicates IDs with the correct field separator.
+- Web data prefers record bodies over the summary index, parses sections with fence
+  awareness, keeps fenced evidence, accepts both summary formats, and compares generated
+  content without the timestamp so an unchanged run keeps the file byte-identical.
+- A knowledge base's `qs` now calls the shared summary script, so `psr` and `qs` produce
+  the same AI index; `psr index [--rebuild] [--web]` refreshes derived files on demand.
+- Web: the selection is resolved before rendering (first card is active), keyboard focus
+  survives Enter and tag toggles, invalid or reversed date filters are cleared, mobile
+  gets a “返回结果” action that restores the scroll position, and filters collapse by
+  default on narrow screens.
+- README quick start shows the `psr` path; stale claims about vendoring `psr` and about
+  doctor regenerating web data were corrected.
+
+
 ## [0.8.0] - 2026-10-22
 
 ### Added
@@ -66,7 +107,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sample record/pattern/review.
 - `install.sh --bin [--bin-dir DIR]` links `psr` into `~/.local/bin` and refuses to
   replace an unrelated existing command.
-- `sync-kb-lib.sh` also vendors `bin/psr`, so a knowledge base has the same entry point.
+- `sync-kb-lib.sh` copies the shared record libraries into a knowledge base so its own
+  CLI uses the same parser, id, lock and index rules. `psr` itself stays in the skill.
 
 ### Changed
 
@@ -238,7 +280,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `agents/*.yaml` metadata for multiple runtimes.
 - GitHub Actions workflow for validation and smoke tests.
 
-[Unreleased]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.5.1...v0.6.0

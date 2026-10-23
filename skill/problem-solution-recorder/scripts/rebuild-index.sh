@@ -66,6 +66,8 @@ index="$root/INDEX.md"
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/psr-index-rebuild.XXXXXX")"
 
 # shellcheck source=/dev/null
+. "$SCRIPT_DIR/lib/enumerate.sh"
+# shellcheck source=/dev/null
 . "$SCRIPT_DIR/lib/index.sh"
 # shellcheck source=/dev/null
 . "$SCRIPT_DIR/lib/lock.sh"
@@ -74,9 +76,13 @@ trap 'psr_lock_release "$root"; rm -rf "$tmp_dir"; exit 130' INT TERM HUP
 psr_lock_acquire "$root" || exit 1
 
 files=()
+if ! psr_list_records "$records_dir" "$tmp_dir/files"; then
+  printf 'Could not enumerate %s; index left unchanged.\n' "$records_dir" >&2
+  exit 1
+fi
 while IFS= read -r f; do
   files+=("$f")
-done < <(find "$records_dir" -type f -name '*.md' | sort)
+done < "$tmp_dir/files"
 
 if [[ ${#files[@]} -eq 0 ]]; then
   printf 'No records found under %s\n' "$records_dir" >&2

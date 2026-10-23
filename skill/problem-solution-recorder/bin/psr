@@ -15,6 +15,9 @@ SKILL_DIR="$( ( unset CDPATH; cd -P -- "$(dirname -- "$SELF")/.." >/dev/null 2>&
 SCRIPTS="$SKILL_DIR/scripts"
 LIB="$SCRIPTS/lib"
 
+# shellcheck source=/dev/null
+. "$LIB/enumerate.sh"
+
 # 知识库内的副本（<kb>/bin/psr）默认管理它所在的知识库。
 LOCAL_KB=""
 if [[ -f "$SKILL_DIR/AI入口.md" && -f "$SKILL_DIR/INDEX.md" ]]; then
@@ -46,6 +49,7 @@ Usage:
                                        Search records; literal by default
   psr review [--week YYYY-Www|--month YYYY-MM|--day YYYY-MM-DD] [--dry-run]
   psr review --open                    List unfinished follow-ups across all records
+  psr index [--rebuild] [--web]        Refresh the summary index (and INDEX.md / web data)
   psr --version
 
 Legacy commands (scripts/qs in a knowledge base) keep working; both use the same
@@ -264,9 +268,38 @@ cmd_new() {
   [[ -n "$slug" ]] && args+=(--slug "$slug")
   [[ -n "$template" ]] && args+=(--template "$template")
 
-  local path id
-  path="$("$SCRIPTS/new-record.sh" "${args[@]}")" || die "创建记录失败"
-  id="$(basename "$path" | cut -c1-14)"
+  local path id out rc err saved_id
+  err="$(mktemp "${TMPDIR:-/tmp}/psr-new.XXXXXX")"
+  set +e
+  out="$("$SCRIPTS/new-record.sh" "${args[@]}" 2>"$err")"
+  rc=$?
+  set -e
+  path="$(printf '%s\n' "$out" | head -n 1)"
+
+  if [[ "$rc" -ne 0 ]]; then
+    if [[ -n "$path" && -f "$path" ]]; then
+      saved_id="$(fm_value "$path" id)"
+      if [[ -z "$saved_id" ]]; then
+        saved_id="$(basename "$path" | sed -n -E 's/^([0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{3,})-.*/\1/p')"
+      fi
+      printf '[fail] 记录已保存，但摘要索引未刷新\n' >&2
+      printf '记录: %s（ID %s）\n' "${path#"$root"/}" "$saved_id" >&2
+      printf '恢复: %s/update-ai-summary-index.sh "%s"\n' "$SCRIPTS" "$root" >&2
+      rm -f "$err"
+      exit 3
+    fi
+    cat "$err" >&2
+    rm -f "$err"
+    die "创建记录失败"
+  fi
+  rm -f "$err"
+
+  id="$(fm_value "$path" id)"
+  if [[ -z "$id" ]]; then
+    # 四位以上序号也要完整显示，不能用固定宽度截断。
+    id="$(basename "$path" | sed -n -E 's/^([0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{3,})-.*/\1/p')"
+  fi
+  [[ -n "$id" ]] || die "无法从记录文件名解析 ID: $path"
 
   printf '知识库: %s\n' "$root"
   printf '已创建: %s\n' "${path#"$root"/}"
@@ -279,24 +312,91 @@ section_has_content() {
   local file="$1"
   local heading="$2"
   LC_ALL=C awk -v h="$heading" '
+    function placeholder(line) {
+      if (line == "") return 1
+      if (line ~ /^\[[ xX]\]$/) return 1
+      if (line ~ /^用 1 到 3 句话/) return 1
+      if (line ~ /^写清楚最终改了什么/) return 1
+      if (line ~ /^分层写清楚/) return 1
+      if (line ~ /^用户看到的现象/) return 1
+      if (line ~ /^下次看到类似现象/) return 1
+      if (line ~ /^后续让 AI 总结/) return 1
+      if (line ~ /^粘贴关键输出/) return 1
+      if (line ~ /^关键成功输出/) return 1
+      if (line ~ /^是否需要/) return 1
+      if (line == "示例" || line ~ /"示例"/) return 1
+      if (line ~ /^待(填写|补充)/) return 1
+      if (line == "TBD" || line == "TODO" || line == "-") return 1
+      # 只有标签没有内容，例如 "- 适用边界："。
+      # LC_ALL=C 下按字节判断全角冒号，避免多字节字符类退化。
+      if (line ~ /:$/) return 1
+      if (length(line) >= 3 && substr(line, length(line) - 2) == "：") return 1
+      return 0
+    }
+    BEGIN { in_fence = 0 }
     $0 == "## " h { s = 1; next }
     s && /^## / { exit }
+    s && /^```/ { in_fence = !in_fence; next }
+    s && in_fence {
+      line = $0
+      sub(/^[[:space:]]+/, "", line)
+      sub(/[[:space:]]+$/, "", line)
+      if (line ~ /^#/) next
+      # 只有括号/逗号的骨架行不算内容。
+      if (line ~ /^[{}[\],;]+$/) next
+      if (placeholder(line)) next
+      found = 1
+      exit
+    }
     s {
       line = $0
       gsub(/^[[:space:]*-]+/, "", line)
       gsub(/[[:space:]]+$/, "", line)
-      if (line == "") next
-      if (line == "待填写" || line == "待填写。") next
-      if (line ~ /^\[[ xX]\]$/) next
-      if (line ~ /^用 1 到 3 句话/) next
-      if (line ~ /^写清楚最终改了什么/) next
-      if (line ~ /^用户看到的现象/) next
-      if (line ~ /^下次看到类似现象/) next
-      if (line ~ /^后续让 AI 总结/) next
+      if (line ~ /^<!--.*-->$/) next
+      if (placeholder(line)) next
       found = 1
       exit
     }
     END { exit(found ? 0 : 1) }
+  ' "$file"
+}
+
+# 记录正文（去掉 front matter，首个标题归一化）与模板一致时，说明完全没有填写。
+strip_body_for_compare() {
+  LC_ALL=C awk '
+    NR == 1 && $0 == "---" { fm = 1; next }
+    fm && $0 == "---" { fm = 0; next }
+    fm { next }
+    /^#[[:space:]]/ { if (!h) { h = 1; print "# TITLE"; next } }
+    # 空行差异（front matter 后的空行数量）不影响“是否填写”的判断。
+    $0 == "" { next }
+    { print }
+  ' "$1"
+}
+
+record_matches_template() {
+  local file="$1"
+  local template="$2"
+  [[ -f "$template" ]] || return 1
+  local a b
+  a="$(strip_body_for_compare "$file" | cksum)"
+  b="$(strip_body_for_compare "$template" | cksum)"
+  [[ -n "$a" && "$a" == "$b" ]]
+}
+
+# 读取 front matter 里的单个字段（只认第一个 --- 块）。
+fm_value() {
+  local file="$1"
+  local key="$2"
+  LC_ALL=C awk -v k="$key" '
+    NR == 1 && $0 == "---" { fm = 1; next }
+    fm && $0 == "---" { exit }
+    fm && index($0, k ":") == 1 {
+      sub("^" k ":[[:space:]]*", "")
+      gsub(/^"|"$/, "")
+      print
+      exit
+    }
   ' "$file"
 }
 
@@ -312,15 +412,41 @@ record_status() {
 set_record_status() {
   local file="$1"
   local status="$2"
-  local tmp
+  local tmp mode
   tmp="$(mktemp "${TMPDIR:-/tmp}/psr-status.XXXXXX")"
-  awk -v st="$status" '
-    BEGIN { fm = 0; done = 0 }
-    NR == 1 && $0 == "---" { fm = 1; print; next }
-    fm && !done && /^status:/ { print "status: " st; done = 1; next }
-    { print }
-    END { }
-  ' "$file" > "$tmp"
+
+  if [[ "$(head -n 1 "$file")" != "---" ]]; then
+    # 没有 front matter：补一个最小块，而不是改到正文。
+    { printf -- '---\nstatus: %s\n---\n\n' "$status"; cat "$file"; } > "$tmp"
+  else
+    LC_ALL=C awk -v st="$status" '
+      BEGIN { fm = 0; seen = 0 }
+      NR == 1 && $0 == "---" { fm = 1; print; next }
+      fm && $0 == "---" {
+        if (!seen) print "status: " st
+        fm = 0; print; next
+      }
+      fm && !seen && /^status:/ { print "status: " st; seen = 1; next }
+      { print }
+    ' "$file" > "$tmp"
+  fi
+
+  mode="$(stat -f %Lp "$file" 2>/dev/null || stat -c %a "$file" 2>/dev/null || true)"
+  if [[ -n "$mode" ]]; then
+    chmod "$mode" "$tmp" 2>/dev/null || true
+  fi
+
+  # 写回后再确认，避免把失败当成成功。
+  if [[ "$(LC_ALL=C awk '
+    NR == 1 && $0 == "---" { fm = 1; next }
+    fm && $0 == "---" { exit }
+    fm && /^status:/ { sub(/^status:[[:space:]]*/, ""); gsub(/^"|"$/, ""); print; exit }
+  ' "$tmp")" != "$status" ]]; then
+    rm -f "$tmp"
+    printf 'psr: 无法在 front matter 中写入状态: %s\n' "$file" >&2
+    return 1
+  fi
+
   mv "$tmp" "$file"
 }
 
@@ -329,7 +455,7 @@ count_followups() {
   LC_ALL=C awk '
     $0 == "## 后续事项" { s = 1; next }
     s && /^## / { exit }
-    s && /^- \[[ xX]\]/ { n++ }
+    s && /^- \[[ xX]\]/ && $0 !~ /^[-*][[:space:]]*\[[ xX]\][[:space:]]*是否需要/ { n++ }
     END { print n + 0 }
   ' "$file"
 }
@@ -364,14 +490,51 @@ cmd_finalize() {
   local root
   root="$(require_root)"
 
-  local file=""
-  file="$(find "$root/records" -type f -name "${id}-*.md" 2>/dev/null | sort | head -n 1)"
-  [[ -n "$file" ]] || die "找不到记录: $id"
+  if [[ ! "$id" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{3,}$ ]]; then
+    printf 'psr: 记录 ID 格式应为 YYYY-MM-DD-NNN（序号至少三位）: %s\n' "$id" >&2
+    exit 2
+  fi
+
+  local matches=() list
+  list="$(mktemp "${TMPDIR:-/tmp}/psr-finalize.XXXXXX")"
+  if ! psr_list_records "$root/records" "$list"; then
+    rm -f "$list"
+    printf 'psr: 读取记录目录失败，未修改任何文件\n' >&2
+    exit 2
+  fi
+  while IFS= read -r f; do
+    [[ "${f##*/}" == "$id"-*.md ]] && matches+=("$f")
+  done < "$list"
+  rm -f "$list"
+
+  if [[ ${#matches[@]} -eq 0 ]]; then
+    die "找不到记录: $id"
+  fi
+  if [[ ${#matches[@]} -gt 1 ]]; then
+    printf 'psr: ID %s 对应多条记录，拒绝猜测：\n' "$id" >&2
+    local dup
+    for dup in "${matches[@]}"; do
+      printf '  - %s\n' "${dup#"$root"/}" >&2
+    done
+    exit 1
+  fi
+  local file="${matches[0]}"
 
   local rel="${file#"$root"/}"
   local title
   title="$(LC_ALL=C awk '/^#[[:space:]]+/ { sub(/^#[[:space:]]+/, ""); print; exit }' "$file")"
   [[ -n "$title" ]] || title="$id"
+
+  # ---- 模板未填写直接拒绝 ----
+  local tpl
+  for tpl in "$root/_templates/快记模板.md" "$root/_templates/问题记录模板.md"; do
+    if record_matches_template "$file" "$tpl"; then
+      printf '[fail] 记录内容仍是模板原文，未做任何填写\n' >&2
+      printf '记录已保存: %s（ID %s）\n' "$rel" "$id" >&2
+      printf '编辑后重试: psr finalize %s --status %s\n' "$id" "$target_status" >&2
+      exit 1
+    fi
+  done
 
   # ---- 按目标状态校验内容 ----
   local missing=()
@@ -425,7 +588,7 @@ cmd_finalize() {
   schema="$(psr_index_schema "$index")"
   label="$(psr_status_label "$target_status" "$schema")"
 
-  set_record_status "$file" "$target_status"
+  set_record_status "$file" "$target_status" || die "状态写入失败，记录未修改"
 
   # 索引状态：工具占位值才覆盖；人工状态保留并检查冲突。
   local index_note="已同步"
@@ -434,11 +597,11 @@ cmd_finalize() {
       ($1 == id) || ($1 == "" && $7 == rel) { print; exit }
     ')"
     if [[ -n "$row_fields" ]]; then
-      local f_id f_date f_title f_tools f_status f_root f_rel
-      IFS=$'\037' read -r f_id f_date f_title f_tools f_status f_root f_rel <<< "$row_fields"
+      local f_id f_date f_title f_tools f_status f_root f_rel f_tags
+      IFS=$'\037' read -r f_id f_date f_title f_tools f_status f_root f_rel f_tags <<< "$row_fields"
       old_cell="$f_status"
       if psr_status_is_tool_owned "$old_cell"; then
-        new_row="$(psr_index_row "$schema" "$f_id" "$f_date" "$f_title" "$f_tools" "-" "$label" "$f_root" "$f_rel")"
+        new_row="$(psr_index_row "$schema" "$f_id" "$f_date" "$f_title" "$f_tools" "${f_tags:--}" "$label" "$f_root" "$f_rel")"
         psr_index_replace_row "$index" "$f_id" "$f_rel" "$new_row"
       else
         local human_machine
@@ -456,16 +619,34 @@ cmd_finalize() {
 
   local summary_note="已更新"
   if ! "$SCRIPTS/update-ai-summary-index.sh" "$root" --no-lock >/dev/null 2>&1; then
-    printf '[fail] 摘要索引更新失败\n' >&2
-    printf '记录已保存: %s（ID %s）\n' "$rel" "$id" >&2
-    printf '恢复: psr finalize %s --status %s\n' "$id" "$target_status" >&2
+    printf '[fail] 摘要索引更新失败；记录已保存并写入状态\n' >&2
+    printf '记录: %s（ID %s）\n' "$rel" "$id" >&2
+    printf '恢复: psr index\n' >&2
     exit 1
   fi
 
-  local check_note="通过"
-  if ! "$SCRIPTS/check-kb.sh" "$root" --quiet >/dev/null 2>&1; then
-    check_note="发现疑似敏感信息（详见 psr doctor 或 check-kb.sh 输出）"
+  local web_note="" web_failed=0
+  if [[ -f "$root/web/generate-data.js" ]]; then
+    set +e
+    web_note="$(refresh_web "$root")"
+    local web_rc=$?
+    set -e
+    if [[ "$web_rc" -ne 0 ]]; then
+      web_failed=1
+    fi
   fi
+
+  local check_note="通过" check_rc=0 check_err
+  check_err="$(mktemp "${TMPDIR:-/tmp}/psr-secret.XXXXXX")"
+  set +e
+  "$SCRIPTS/check-kb.sh" "$root" --quiet >/dev/null 2>"$check_err"
+  check_rc=$?
+  set -e
+  case "$check_rc" in
+    0) check_note="通过" ;;
+    1) check_note="未通过：发现疑似敏感信息" ;;
+    *) check_note="结果未知：扫描无法完成" ;;
+  esac
 
   printf '知识库: %s\n' "$root"
   printf '已归档: %s\n' "$title"
@@ -474,24 +655,97 @@ cmd_finalize() {
   else
     printf '状态: %s（%s）\n' "$label" "$target_status"
   fi
+  printf '记录: %s（ID %s）\n' "$rel" "$id"
   printf '索引: %s\n' "$index_note"
   printf '摘要索引: %s\n' "$summary_note"
+  if [[ -n "$web_note" ]]; then
+    printf '%s\n' "$web_note"
+  fi
   printf '敏感检查: %s\n' "$check_note"
   printf '后续事项: %s 项\n' "$(count_followups "$file")"
+
+  if [[ "$check_rc" -ne 0 ]]; then
+    sed -n '1,20p' "$check_err" >&2
+    rm -f "$check_err"
+    printf '记录已保存并归档，但敏感检查未通过。\n' >&2
+    printf '处理后重跑: %s/check-kb.sh "%s"\n' "$SCRIPTS" "$root" >&2
+    if [[ "$check_rc" -eq 1 ]]; then
+      exit 1
+    fi
+    exit 2
+  fi
+  rm -f "$check_err"
+
+  if [[ "$web_failed" -eq 1 ]]; then
+    printf '记录已保存并归档，但 Web 数据待同步。\n' >&2
+    printf '恢复: psr index --web\n' >&2
+    exit 1
+  fi
+
+  return 0
 }
 
 
+# ---------------------------------------------------------------- maintenance
+refresh_web() {
+  local root="$1"
+  local gen="$root/web/generate-data.js"
+
+  [[ -f "$gen" ]] || return 0
+  if ! command -v node >/dev/null 2>&1; then
+    printf 'Web: 待同步（未找到 node）\n'
+    return 1
+  fi
+  if node "$gen" >/dev/null 2>&1; then
+    printf 'Web: 已同步\n'
+    return 0
+  fi
+  printf 'Web: 待同步（%s 执行失败）\n' "$gen"
+  return 1
+}
+
+cmd_index() {
+  local rebuild=0
+  local web=0
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --rebuild) rebuild=1; shift ;;
+      --web) web=1; shift ;;
+      -h|--help) usage; exit 0 ;;
+      *) die "多余的参数: $1" ;;
+    esac
+  done
+
+  local root
+  root="$(require_root)"
+
+  if [[ "$rebuild" -eq 1 ]]; then
+    "$SCRIPTS/rebuild-index.sh" "$root" || die "重建索引失败"
+  fi
+  "$SCRIPTS/update-ai-summary-index.sh" "$root" || die "更新摘要索引失败"
+  if [[ "$web" -eq 1 ]]; then
+    refresh_web "$root" || die "Web 同步失败"
+  fi
+}
+
 # ---------------------------------------------------------------- search
 # 统一记录流：rel, id, date, title, status, tools, tags, signature, root,
-# fix, verify, reuse, follow_items（\036 分隔，保留 [ ]/[x]）。
+# fix, verify, reuse, follow_items（\036 分隔，保留 [ ]/[x]）, summary。
 records_tsv() {
   local root="$1"
   local files=()
-  local stream
+  local stream list
 
+  list="$(mktemp "${TMPDIR:-/tmp}/psr-records-list.XXXXXX")"
+  if ! psr_list_records "$root/records" "$list"; then
+    rm -f "$list"
+    return 2
+  fi
   while IFS= read -r f; do
     files+=("$f")
-  done < <(find "$root/records" -type f -name '*.md' 2>/dev/null | sort)
+  done < "$list"
+  rm -f "$list"
 
   [[ ${#files[@]} -gt 0 ]] || return 0
 
@@ -503,9 +757,9 @@ records_tsv() {
 
   LC_ALL=C awk -F'\t' '
     function emit() {
-      printf "%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\n", \
+      printf "%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\n", \
         rel, v["id"], v["date"], v["title"], v["status"], v["tools"], v["tags"], \
-        v["signature"], v["root"], v["fix"], v["verify"], v["reuse"], v["follow_items"]
+        v["signature"], v["root"], v["fix"], v["verify"], v["reuse"], v["follow_items"], v["summary"]
     }
     $1 == "@R" { if (rel != "") emit(); rel = $2; delete v; next }
     $1 == "@F" { v[$2] = $3; next }
@@ -579,8 +833,8 @@ cmd_search() {
   local found=0
   local rc=0
   set +e
-  found="$(printf '%s\n' "$tsv" | LC_ALL=C awk -F'\037' \
-    -v q="$query" -v re="$regex" -v limit="$limit" \
+  found="$(printf '%s\n' "$tsv" | PSR_SEARCH_QUERY="$query" LC_ALL=C awk -F'\037' \
+    -v re="$regex" -v limit="$limit" \
     -v st="$status_f" -v tool="$tool_f" -v tag="$tag_f" \
     -v since="$since" -v until="$until" '
     function lc(s) { return tolower(s) }
@@ -595,6 +849,7 @@ cmd_search() {
     }
     function weight(field, w) { return w * hits(field) / nterms }
     BEGIN {
+      q = ENVIRON["PSR_SEARCH_QUERY"]
       if (re == 1) {
         nterms = 1
         terms[1] = lc(q)
@@ -607,7 +862,7 @@ cmd_search() {
     {
       rel = $1; id = $2; date = $3; title = $4; status = $5
       tools = $6; tags = $7; sig = $8; root = $9; fix = $10
-      verify = $11; reuse = $12; follow = $13
+      verify = $11; reuse = $12; follow = $13; summ = $14
 
       if (st != "" && status != st) next
       if (tool != "" && index(lc(tools), lc(tool)) == 0) next
@@ -616,7 +871,7 @@ cmd_search() {
       if (until != "" && date > until) next
 
       # 多词查询：所有词都必须出现在这条记录里（AND），再按字段加权。
-      alltext = lc(title " " id " " tools " " tags " " sig " " root " " fix " " verify " " reuse " " follow)
+      alltext = lc(title " " id " " tools " " tags " " sig " " root " " fix " " verify " " reuse " " follow " " summ)
       if (re == 1) {
         if (alltext !~ qre) next
       } else {
@@ -627,7 +882,7 @@ cmd_search() {
         if (!ok) next
       }
 
-      score = weight(title, 60) + weight(id, 50) + weight(sig, 40) + \
+      score = weight(title, 60) + weight(id, 50) + weight(sig, 40) + weight(summ, 40) + \
               weight(root, 20) + weight(fix, 20) + weight(verify, 20) + \
               weight(reuse, 20) + weight(tags, 15) + weight(tools, 15) + weight(follow, 10)
       if (re == 0 && lc(title) == lc(q)) score += 100
@@ -636,6 +891,7 @@ cmd_search() {
       if (hits(title) > 0) why = why (why == "" ? "" : "、") "标题"
       if (hits(id) > 0) why = why (why == "" ? "" : "、") "ID"
       if (hits(sig) > 0) why = why (why == "" ? "" : "、") "问题签名"
+      if (hits(summ) > 0) why = why (why == "" ? "" : "、") "一句话结论"
       if (hits(root) > 0) why = why (why == "" ? "" : "、") "根因"
       if (hits(fix) > 0) why = why (why == "" ? "" : "、") "解决方案"
       if (hits(verify) > 0) why = why (why == "" ? "" : "、") "验证"
@@ -693,6 +949,23 @@ cmd_search() {
 
 
 # ---------------------------------------------------------------- review
+valid_ymd() {
+  local d="$1" out=""
+  [[ "$d" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || return 1
+  out="$(date -d "$d" +%F 2>/dev/null || date -j -f "%Y-%m-%d" "$d" +%F 2>/dev/null || true)"
+  [[ "$out" == "$d" ]]
+}
+
+valid_iso_week() {
+  local key="$1" d="" out=""
+  [[ "$key" =~ ^[0-9]{4}-W(0[1-9]|[1-4][0-9]|5[0-3])$ ]] || return 1
+  d="$(date -d "${key}-1" +%F 2>/dev/null || date -j -f "%G-W%V-%u" "${key}-1" +%F 2>/dev/null || true)"
+  # BSD date 可能不解析 ISO 周；能解析就做一次往返校验。
+  [[ -n "$d" ]] || return 0
+  out="$(date -d "$d" +%G-W%V 2>/dev/null || date -j -f "%Y-%m-%d" "$d" +%G-W%V 2>/dev/null || true)"
+  [[ "$out" == "$key" ]]
+}
+
 iso_week() {
   local d="$1"
   if date -d "$d" +%G-W%V >/dev/null 2>&1; then
@@ -718,7 +991,8 @@ review_open() {
     exit 2
   fi
 
-  local out
+  local out rc
+  set +e
   out="$(printf '%s\n' "$tsv" | LC_ALL=C awk -F'\037' '
     {
       rel = $1; title = $4; follow = $13
@@ -735,8 +1009,10 @@ review_open() {
     END { if (count == 0) print "没有未完成的后续事项"; exit (count == 0 ? 1 : 0) }
   ')"
   rc=$?
+  set -e
   printf '%s\n' "$out"
-  return "$rc"
+  # 没有待办是正常结果，用 0 退出，避免调用方把它当成错误。
+  return 0
 }
 
 cmd_review() {
@@ -770,16 +1046,17 @@ cmd_review() {
     week)
       [[ -n "$key" ]] || key="$(date +%G-W%V)"
       [[ "$key" =~ ^[0-9]{4}-W[0-9]{2}$ ]] || die "周格式应为 YYYY-Www: $key"
+      valid_iso_week "$key" || die "不存在的周: $key"
       label="每周"
       ;;
     month)
       [[ -n "$key" ]] || key="$(date +%Y-%m)"
-      [[ "$key" =~ ^[0-9]{4}-[0-9]{2}$ ]] || die "月份格式应为 YYYY-MM: $key"
+      [[ "$key" =~ ^[0-9]{4}-(0[1-9]|1[0-2])$ ]] || die "月份格式应为 YYYY-MM: $key"
       label="每月"
       ;;
     day)
       [[ -n "$key" ]] || key="$(date +%F)"
-      [[ "$key" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || die "日期格式应为 YYYY-MM-DD: $key"
+      valid_ymd "$key" || die "不是有效日期: $key"
       label="每日"
       ;;
   esac
@@ -797,6 +1074,8 @@ cmd_review() {
   # 用每条记录自己的日期判定所属周期（避免解析 ISO 周首日）。
   local tmpd keep
   tmpd="$(mktemp -d "${TMPDIR:-/tmp}/psr-review.XXXXXX")"
+  PSR_REVIEW_TMPDIR="$tmpd"
+  trap 'rm -rf "${PSR_REVIEW_TMPDIR:-}"' EXIT
   keep="$tmpd/keep"
   : > "$keep"
   printf '%s\n' "$tsv" | while IFS=$'\037' read -r rel id rdate rest; do
@@ -838,12 +1117,13 @@ cmd_review() {
 
       if (reuse != "") {
         ncand++
-        cand[ncand] = sprintf("- %s — %s\n  - 复用经验：%s", title, rel, substr(reuse, 1, 160))
+        cand[ncand] = sprintf("- %s — %s\n  - 复用经验：%s", title, rel, reuse)
       }
 
       nf = split(follow, items, "\036")
       for (i = 1; i <= nf; i++) {
         it = items[i]
+        if (it ~ /^\[[ xX]\] 是否需要/) next
         if (it ~ /^\[ \]/) {
           nopen++
           openitem[nopen] = sprintf("- %s — %s", it, rel)
@@ -919,14 +1199,30 @@ cmd_review() {
     return 0
   fi
 
+  # 复盘写入同样要纳入共享写锁，避免与 finalize / 手工编辑交叉。
+  # shellcheck source=/dev/null
+  . "$LIB/lock.sh"
+  PSR_LOCK_ROOT="$root"
+  trap 'psr_lock_release "$PSR_LOCK_ROOT"; rm -rf "${PSR_REVIEW_TMPDIR:-}"' EXIT
+  trap 'psr_lock_release "$PSR_LOCK_ROOT"; rm -rf "${PSR_REVIEW_TMPDIR:-}"; exit 130' INT TERM HUP
+  psr_lock_acquire "$root" || die "获取写锁失败"
+
   mkdir -p "$root/reviews"
-  local tmp
+
+  local begin_count=0 end_count=0 begin_line=0 end_line=0
+  if [[ -f "$file" ]]; then
+    begin_count="$(grep -c -F "$begin" "$file" || true)"
+    end_count="$(grep -c -F "$endm" "$file" || true)"
+    begin_line="$(grep -n -F "$begin" "$file" | head -n 1 | cut -d: -f1 || true)"
+    end_line="$(grep -n -F "$endm" "$file" | head -n 1 | cut -d: -f1 || true)"
+  fi
+
+  local tmp backup=""
   tmp="$(mktemp "${TMPDIR:-/tmp}/psr-review.XXXXXX")"
 
-  if [[ -f "$file" ]] && grep -Fq "$begin" "$file" && grep -Fq "$endm" "$file"; then
-    local current
+  if [[ -f "$file" && "$begin_count" -eq 1 && "$end_count" -eq 1 && -n "$begin_line" && -n "$end_line" && "$begin_line" -lt "$end_line" ]]; then
+    local current newblock
     current="$(awk -v b="$begin" -v e="$endm" '$0 == b { f = 1 } f { print } $0 == e { f = 0 }' "$file" | LC_ALL=C awk '/^生成时间：/ { print "生成时间：X"; next } { print }')"
-    local newblock
     newblock="$( { printf '%s\n\n%s\n' "$begin" "$generated"; printf '%s\n' "$endm"; } | LC_ALL=C awk '/^生成时间：/ { print "生成时间：X"; next } { print }')"
     if [[ "$current" == "$newblock" ]]; then
       printf '复盘无变化: %s\n' "$file"
@@ -939,6 +1235,23 @@ cmd_review() {
       printf '%s\n' "$endm"
       awk -v b="$begin" -v e="$endm" 'f { print } $0 == e { f = 1 }' "$file"
     } > "$tmp"
+  elif [[ -f "$file" && "$begin_count" -eq 0 && "$end_count" -eq 0 && -s "$file" ]]; then
+    # 纯手写的历史复盘：先备份，再把旧内容整段保留，绝不直接覆盖。
+    backup="${file}.pre-marker.$(date +%Y%m%d%H%M%S).bak"
+    cp -p "$file" "$backup"
+    {
+      printf '%s\n\n%s\n' "$begin" "$generated"
+      printf '%s\n\n' "$endm"
+      printf '## 历史内容（迁移自旧文件）\n\n'
+      printf '以下内容来自没有生成标记的旧文件，已原样保留。\n\n'
+      cat "$backup"
+    } > "$tmp"
+  elif [[ -f "$file" && -s "$file" && ( "$begin_count" -ne 1 || "$end_count" -ne 1 || "$begin_line" -gt "$end_line" ) ]]; then
+    printf '[fail] %s 的生成标记异常（begin=%s, end=%s），未写入。\n' \
+      "$file" "$begin_count" "$end_count" >&2
+    printf '请手工修正为各一个，且 BEGIN 在 END 之前；原文件未改动。\n' >&2
+    rm -f "$tmp"
+    exit 1
   else
     {
       printf '%s\n\n%s\n' "$begin" "$generated"
@@ -950,6 +1263,9 @@ cmd_review() {
 
   mv "$tmp" "$file"
   printf '已生成: %s\n' "$file"
+  if [[ -n "$backup" ]]; then
+    printf '旧文件已备份: %s\n' "$backup"
+  fi
 }
 
 # ---------------------------------------------------------------- main
@@ -972,6 +1288,7 @@ case "$cmd" in
   finalize) cmd_finalize "$@" ;;
   search) cmd_search "$@" ;;
   review) cmd_review "$@" ;;
+  index) cmd_index "$@" ;;
   --version|version|-v) version ;;
   help|-h|--help) usage ;;
   *) usage >&2; exit 2 ;;

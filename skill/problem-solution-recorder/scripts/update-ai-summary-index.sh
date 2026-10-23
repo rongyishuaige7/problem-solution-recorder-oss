@@ -26,6 +26,9 @@ end_marker='<!-- PSR:END GENERATED -->'
   exit 1
 }
 
+# shellcheck source=/dev/null
+. "$SCRIPT_DIR/lib/enumerate.sh"
+
 if [[ "$use_lock" -eq 1 ]]; then
   # shellcheck source=/dev/null
   . "$SCRIPT_DIR/lib/lock.sh"
@@ -142,9 +145,14 @@ emit_record() {
 
 files=()
 if [[ -d "$records_dir" ]]; then
+  list="$tmp_dir/files"
+  if ! psr_list_records "$records_dir" "$list"; then
+    printf '[fail] could not enumerate %s; %s left unchanged.\n' "$records_dir" "$target" >&2
+    exit 1
+  fi
   while IFS= read -r f; do
     files+=("$f")
-  done < <(find "$records_dir" -type f -name '*.md' | sort)
+  done < "$list"
 fi
 
 # 先把全部记录解析到一个临时文件，再读它：

@@ -57,14 +57,22 @@ check_dir "reviews"
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/psr-doctor.XXXXXX")"
 trap 'rm -rf "$tmp_dir"' EXIT
 
+# shellcheck source=/dev/null
+. "$SCRIPT_DIR/lib/enumerate.sh"
+
 records_file="$tmp_dir/records.tsv"
 : > "$records_file"
 
 rec_files=()
 if [[ -d "$root/records" ]]; then
-  while IFS= read -r f; do
-    rec_files+=("$f")
-  done < <(find "$root/records" -type f -name '*.md' | sort)
+  if psr_list_records "$root/records" "$tmp_dir/record-files"; then
+    while IFS= read -r f; do
+      rec_files+=("$f")
+    done < "$tmp_dir/record-files"
+  else
+    printf '[fail] could not enumerate records; results below are incomplete\n'
+    failures=$((failures + 1))
+  fi
 fi
 
 records_found="${#rec_files[@]}"
@@ -104,7 +112,7 @@ if [[ "$records_found" -gt 0 ]]; then
   fi
 
   # 1) 重复 ID（完整比较，不再截断到三位序号）
-  dup_ids="$(cut -f1 "$records_file" | sort | uniq -d || true)"
+  dup_ids="$(awk -F'\037' '{ print $1 }' "$records_file" | sort | uniq -d || true)"
   if [[ -n "$dup_ids" ]]; then
     printf '[fail] duplicate record IDs:\n'
     printf '%s\n' "$dup_ids" | sed 's/^/  - /'
@@ -141,13 +149,13 @@ if [[ -f "$index_path" ]]; then
   if [[ "$records_found" -gt 0 ]]; then
     # 3) 记录未入索引
     missing_rows=""
-    while IFS= read -r file; do
+    for file in ${rec_files[@]+"${rec_files[@]}"}; do
       rel="${file#"$root"/}"
       if ! grep -Fq "$rel" "$index_path"; then
         missing_rows="${missing_rows}${rel}
 "
       fi
-    done < <(find "$root/records" -type f -name '*.md' | sort)
+    done
     if [[ -n "$missing_rows" ]]; then
       printf '[warn] records missing from INDEX.md:\n'
       printf '%s' "$missing_rows" | sed '/^$/d; s/^/  - /'
@@ -158,6 +166,14 @@ if [[ -f "$index_path" ]]; then
 
     # 4) 状态不一致：转义竖线先替换成哨兵，避免表格列错位
     mismatches="$(awk -v recs="$records_file" '
+      function machine(cell) {
+        if (cell ~ /^solved/ || cell ~ /^已解决/) return "solved"
+        if (cell ~ /^workaround/ || cell ~ /^临时方案/ || cell ~ /^变通/) return "workaround"
+        if (cell ~ /^investigating/ || cell ~ /^调查中/ || cell ~ /^实施中/) return "investigating"
+        if (cell ~ /^unresolved/ || cell ~ /^未解决/) return "unresolved"
+        if (cell ~ /^draft/ || cell ~ /^草稿/) return "draft"
+        return ""
+      }
       BEGIN {
         while ((getline line < recs) > 0) {
           n = split(line, p, "\037")
@@ -174,10 +190,11 @@ if [[ -f "$index_path" ]]; then
         n = split(row, f, "|")
         if (schema == 7) { row_status = f[6]; link = f[8] } else { row_status = f[4]; link = f[7] }
         gsub(/^[[:space:]]+|[[:space:]]+$/, "", row_status)
-        if (row_status !~ /^(draft|solved|workaround|investigating|unresolved)$/) next
+        mapped = machine(row_status)
+        if (mapped == "") next
         if (!match(link, /\(([^)]+)\)/)) next
         rel = substr(link, RSTART + 1, RLENGTH - 2)
-        if (rel in status && status[rel] != row_status) {
+        if (rel in status && status[rel] != mapped) {
           printf "  - %s: INDEX=%s record=%s\n", rel, row_status, status[rel]
         }
       }
@@ -196,7 +213,7 @@ if [[ -f "$index_path" ]]; then
       LC_ALL=C awk '
         NR == 1 && $0 == "---" { fm = 1; next }
         fm && $0 == "---" { exit }
-        fm && /^date:[[:space:]]*[0-9]/ { found = 1; exit }
+        fm && /^date:[[:space:]]*"?[0-9]{4}-[0-9]{2}-[0-9]{2}/ { found = 1; exit }
         END { exit(found ? 0 : 1) }
       ' "$f" || missing_date="${missing_date}${f}
 "

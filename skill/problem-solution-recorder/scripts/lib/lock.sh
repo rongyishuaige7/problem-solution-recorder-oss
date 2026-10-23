@@ -11,6 +11,11 @@
 #     (skill scripts and the knowledge base's own CLI).
 #   - A stale lock is removed only when it is older than 300s AND its pid
 #     is no longer alive.
+#   - Reclaiming a stale lock is itself mutual-exclusive: a reclaimer must
+#     create <lock>.reclaim, then re-check that the lock it is about to delete
+#     is still the same stale instance. Without that step two reclaimers could
+#     both delete, and the later one would remove the fresh lock created by
+#     the earlier one.
 #   - Release only removes the lock when the pid file still holds this
 #     process id, so a process that lost its lock cannot delete someone
 #     else's.
@@ -33,11 +38,38 @@ psr_lock_mtime() {
   esac
 }
 
+# 0 when the lock looks abandoned: older than 300s and its pid is gone.
+psr_lock_is_stale() {
+  local lock="$1"
+  local now age mtime pid
+
+  now="$(date +%s)"
+  mtime="$(psr_lock_mtime "$lock")"
+  # mtime 未知时不要当成“很旧”：否则会在持有者刚建目录、还没写 pid 的
+  # 微秒窗口里误删活跃锁。
+  if [[ "$mtime" -eq 0 ]]; then
+    age=0
+  else
+    age=$(( now - mtime ))
+    [[ "$age" -lt 0 ]] && age=0
+  fi
+  [[ "$age" -gt 300 ]] || return 1
+
+  pid=""
+  if [[ -f "$lock/pid" ]]; then
+    pid="$(cat "$lock/pid" 2>/dev/null || true)"
+  fi
+  [[ -n "$pid" ]] || return 1
+  kill -0 "$pid" 2>/dev/null && return 1
+  return 0
+}
+
 psr_lock_acquire() {
   local root="$1"
   local retries="${2:-${PSR_LOCK_RETRIES:-50}}"
   local lock="$root/$PSR_LOCK_NAME"
-  local waited=0 age now pid mtime
+  local reclaim="$lock.reclaim"
+  local waited=0
 
   # 同进程可重入：调用方（例如 new-record → summary）已经持锁时不再等待。
   if [[ -f "$lock/pid" ]] && [[ "$(cat "$lock/pid" 2>/dev/null || true)" == "$$" ]]; then
@@ -45,26 +77,47 @@ psr_lock_acquire() {
     return 0
   fi
 
-  while ! mkdir "$lock" 2>/dev/null; do
+  while :; do
+    if mkdir "$lock" 2>/dev/null; then
+      break
+    fi
+
     if [[ -d "$lock" ]]; then
-      now="$(date +%s)"
-      mtime="$(psr_lock_mtime "$lock")"
-      # mtime 未知时不要当成“很旧”：否则会在持有者刚建目录、还没写 pid 的
-      # 微秒窗口里误删活跃锁，导致两个进程同时进入临界区。
-      if [[ "$mtime" -eq 0 ]]; then
-        age=0
-      else
-        age=$(( now - mtime ))
-        [[ "$age" -lt 0 ]] && age=0
-      fi
-      pid=""
-      [[ -f "$lock/pid" ]] && pid="$(cat "$lock/pid" 2>/dev/null || true)"
-      if [[ "$age" -gt 300 && -n "$pid" ]] && ! kill -0 "$pid" 2>/dev/null; then
-        printf 'Removing stale lock (age %ss, pid %s): %s\n' "$age" "$pid" "$lock" >&2
-        rm -rf "$lock" 2>/dev/null || true
+      if psr_lock_is_stale "$lock"; then
+        # 只有拿到 .reclaim 的进程可以回收；其他进程继续等待。
+        if mkdir "$reclaim" 2>/dev/null; then
+          if [[ -n "${PSR_LOCK_TEST_PAUSE:-}" ]]; then
+            # 仅用于回归测试固定交错窗口；默认不生效。
+            sleep "$PSR_LOCK_TEST_PAUSE"
+          fi
+          # 重新确认：这段窗口里锁可能已被别的进程替换成活跃锁。
+          if [[ -d "$lock" ]] && psr_lock_is_stale "$lock"; then
+            printf 'Removing stale lock: %s\n' "$lock" >&2
+            rm -rf "$lock" 2>/dev/null || true
+          fi
+          rmdir "$reclaim" 2>/dev/null || true
+        fi
+
+        waited=$(( waited + 1 ))
+        if [[ "$waited" -gt "$retries" ]]; then
+          printf 'Another writer holds the lock: %s\n' "$lock" >&2
+          printf 'If no other process is running, remove it manually.\n' >&2
+          return 1
+        fi
+        sleep 0.2
         continue
       fi
+
+      # 回收者崩溃后留下的标记：超过 60s 允许任意等待者清理，避免永久卡死。
+      if [[ -d "$reclaim" ]]; then
+        local reclaim_age
+        reclaim_age=$(( $(date +%s) - $(psr_lock_mtime "$reclaim") ))
+        if [[ "$reclaim_age" -gt 60 ]]; then
+          rmdir "$reclaim" 2>/dev/null || true
+        fi
+      fi
     fi
+
     sleep 0.2
     waited=$(( waited + 1 ))
     if [[ "$waited" -gt "$retries" ]]; then

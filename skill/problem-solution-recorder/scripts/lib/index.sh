@@ -95,7 +95,7 @@ psr_index_insert() {
   mv "$tmp" "$index"
 }
 
-# Emit existing rows as TSV: id, date, title, tools, status, root, rel.
+# Emit existing rows as TSV: id, date, title, tools, status, root, rel, tags.
 # Escaped pipes are handled; cells keep their original `\|` escaping so that
 # re-emitting them is byte-stable.
 psr_index_rows() {
@@ -111,14 +111,15 @@ psr_index_rows() {
       if (row !~ /^\|[[:space:]]*[0-9]{4}-[0-9]{2}-[0-9]{2}/) next
       n = split(row, f, "|")
       for (i = 1; i <= n; i++) f[i] = trim(f[i])
-      if (schema == 7) { id = f[2]; date = f[3]; title = f[4]; tools = f[5]; status = f[6]; root = f[7]; link = f[8] }
-      else { id = ""; date = f[2]; title = f[3]; status = f[4]; tools = f[5]; root = "-"; link = f[7] }
+      if (schema == 7) { id = f[2]; date = f[3]; title = f[4]; tools = f[5]; status = f[6]; root = f[7]; link = f[8]; tags = "" }
+      else { id = ""; date = f[2]; title = f[3]; status = f[4]; tools = f[5]; root = "-"; link = f[7]; tags = f[6] }
       if (!match(link, /\(([^)]+)\)/)) next
       rel = substr(link, RSTART + 1, RLENGTH - 2)
       # 恢复成原始字符；写回时由 psr_index_row/psr_index_escape 统一转义一次。
       gsub(/\001/, "|", id); gsub(/\001/, "|", date); gsub(/\001/, "|", title)
       gsub(/\001/, "|", tools); gsub(/\001/, "|", status); gsub(/\001/, "|", root)
-      printf "%s\037%s\037%s\037%s\037%s\037%s\037%s\n", id, date, title, tools, status, root, rel
+      gsub(/\001/, "|", tags)
+      printf "%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\n", id, date, title, tools, status, root, rel, tags
     }
   ' "$index"
 }

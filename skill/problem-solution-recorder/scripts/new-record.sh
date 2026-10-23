@@ -77,6 +77,8 @@ fi
 
 root="$("$RESOLVE" "$root_arg")"
 # shellcheck source=/dev/null
+. "$SCRIPT_DIR/lib/enumerate.sh"
+# shellcheck source=/dev/null
 . "$SCRIPT_DIR/lib/ids.sh"
 # shellcheck source=/dev/null
 . "$SCRIPT_DIR/lib/index.sh"
@@ -327,8 +329,13 @@ if ! grep -Fq "$record_rel" "$index_path"; then
   fi
 fi
 
-if [[ -x "$SCRIPT_DIR/update-ai-summary-index.sh" ]]; then
-  "$SCRIPT_DIR/update-ai-summary-index.sh" "$root" --no-lock >/dev/null
-fi
-
+# 先报告已落盘的路径：后续派生维护失败时，调用方仍能指出记录位置。
 printf '%s\n' "$record_path"
+
+if [[ -x "$SCRIPT_DIR/update-ai-summary-index.sh" ]]; then
+  if ! "$SCRIPT_DIR/update-ai-summary-index.sh" "$root" --no-lock >/dev/null 2>&1; then
+    printf '[warn] record saved, but the summary index could not be refreshed.\n' >&2
+    printf 'Recover: %s/update-ai-summary-index.sh "%s"\n' "$SCRIPT_DIR" "$root" >&2
+    exit 3
+  fi
+fi

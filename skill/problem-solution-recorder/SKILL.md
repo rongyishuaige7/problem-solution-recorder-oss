@@ -1,6 +1,6 @@
 ---
 name: problem-solution-recorder
-version: 0.8.0
+version: 0.8.1
 license: MIT
 description: Maintain a configurable problem-solution knowledge base for solved incidents, debugging sessions, reusable troubleshooting patterns, and periodic reviews. Use when the user asks to record, archive, review, summarize, search, or preserve a solved issue; when a multi-step debugging task involving CLI tools, MCP, APIs, permissions, configs, dependencies, build errors, adapters, or AI tool behavior is completed; or when the user wants to reuse lessons from previous incidents.
 metadata:
@@ -216,8 +216,9 @@ One parser and one lock govern every writer:
 
 A knowledge base may ship a static dashboard under `web/` plus `bin/web-check`.
 When present, `doctor-local.sh` runs `bin/web-check`, which regenerates `web/data.js`
-and compares record id/date/status against the canonical parser, and rejects tool/tag
-values containing brackets or quotes. The dashboard itself is knowledge-base code;
+in memory (`--check`, no writes), compares content without the generation timestamp,
+matches record id/date/status against the canonical parser, and rejects tool/tag values
+containing brackets or quotes. The dashboard itself is knowledge-base code;
 keep its data generated from Markdown rather than hand-edited.
 
 ## Data Integrity

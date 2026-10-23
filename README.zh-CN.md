@@ -3,7 +3,7 @@
 > 面向 AI 工具和独立开发者的 Markdown 问题解决记忆库。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
-[![Skill version](https://img.shields.io/badge/skill-0.8.0-blue)](./skill/problem-solution-recorder/SKILL.md)
+[![Skill version](https://img.shields.io/badge/skill-0.8.1-blue)](./skill/problem-solution-recorder/SKILL.md)
 
 [![English README](https://img.shields.io/badge/docs-English-0f62fe)](README.md)
 中文说明
@@ -27,14 +27,27 @@
 git clone https://github.com/rongyishuaige7/problem-solution-recorder-oss.git
 cd problem-solution-recorder-oss
 
-skill/problem-solution-recorder/scripts/init-kb.sh "$HOME/problem-solution-kb"
-export PROBLEM_SOLUTION_KB_ROOT="$HOME/problem-solution-kb"
+# 1. 安装 skill 与 psr 命令
+skill/problem-solution-recorder/scripts/install.sh --symlink --agents --claude
+skill/problem-solution-recorder/scripts/install.sh --bin
 
-skill/problem-solution-recorder/scripts/install.sh --symlink --codex --claude
+# 2. 建库并设为默认
+psr init "$HOME/problem-solution-kb"
+psr configure --global "$HOME/problem-solution-kb"
+psr doctor
 
+# 3. 快记 → 补全 → 归档
+psr new "MCP 超时排查" --mode quick
+psr finalize 2026-10-22-001 --status solved
+
+# 4. 检索与复盘
+psr search "MCP 超时" --limit 5
+psr review --week 2026-W43
+
+# 5. 自检
 skill/problem-solution-recorder/scripts/validate-skill.sh
 skill/problem-solution-recorder/scripts/smoke-test.sh
-skill/problem-solution-recorder/scripts/check-kb.sh "$PROBLEM_SOLUTION_KB_ROOT"
+skill/problem-solution-recorder/scripts/check-kb.sh "$HOME/problem-solution-kb"
 ```
 
 ## 工作原理
