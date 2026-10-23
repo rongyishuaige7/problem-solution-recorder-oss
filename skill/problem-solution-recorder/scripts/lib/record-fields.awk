@@ -94,7 +94,11 @@ function strip_line(s) {
   }
 
   gsub(/`/, "", s)
-  gsub(/\*\*/, "", s)
+  # 只有成对的 **粗体** 去标记；**kwargs 这类代码保持原样。
+  while (match(s, /\*\*[^*]+\*\*/)) {
+    inner = substr(s, RSTART + 2, RLENGTH - 4)
+    s = substr(s, 1, RSTART - 1) inner substr(s, RSTART + RLENGTH)
+  }
   return s
 }
 

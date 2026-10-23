@@ -1011,4 +1011,59 @@ printf '%s' "$clean_out" | grep -Fq "设计文档" || fail "link text was droppe
 printf '%s' "$clean_out" | grep -Fq "LINK_URL_TOKEN" && fail "link target leaked into the root cause"
 pass "表格与星号代码保留，链接只留文本"
 
+
+# ---------------------------------------------------------------- v0.8.6 回归
+# V01 回收判断期间，正常释放+新获取必须被 guard 挡住
+kb_handoff="$tmp/kb-handoff"
+mkdir -p "$kb_handoff/.psr.lock"
+printf '999999\n' > "$kb_handoff/.psr.lock/pid"
+touch -t 200001010000 "$kb_handoff/.psr.lock"
+cat > "$tmp/handoff-holder.sh" <<HANDOFF
+#!/usr/bin/env bash
+set -euo pipefail
+. "$SKILL_DIR/scripts/lib/lock.sh"
+PSR_LOCK_TEST_PAUSE_GUARD=1.2 psr_lock_acquire "$kb_handoff" 100 || exit 9
+psr_lock_release "$kb_handoff"
+HANDOFF
+chmod +x "$tmp/handoff-holder.sh"
+"$tmp/handoff-holder.sh" & handoff_pid=$!
+for _ in $(seq 1 300); do [[ -d "$kb_handoff/.psr.lock.guard" ]] && break; sleep 0.02; done
+[[ -d "$kb_handoff/.psr.lock.guard" ]] || fail "reclaimer never took the guard"
+set +e
+bash -c '. "$1/scripts/lib/lock.sh"; psr_lock_acquire "$2" 0 && { psr_lock_release "$2"; exit 0; }; exit 1' _ "$SKILL_DIR" "$kb_handoff"
+handoff_rc=$?
+set -e
+handoff_holder_rc=0
+wait "$handoff_pid" || handoff_holder_rc=$?
+[[ "$handoff_holder_rc" -eq 0 ]] || fail "reclaimer failed to acquire (rc=$handoff_holder_rc)"
+[[ "$handoff_rc" -ne 0 ]] || fail "a normal acquire slipped in while the reclaimer held the guard"
+pass "回收判断期间正常获取被 guard 挡住"
+
+# V02 残留锁与死亡 guard 必须让 doctor 失败
+kb_lockreport="$tmp/kb-lock-report"
+"$PSR" init "$kb_lockreport" >/dev/null
+mkdir -p "$kb_lockreport/.psr.lock" "$kb_lockreport/.psr.lock.guard"
+printf '999999\n' > "$kb_lockreport/.psr.lock/pid"
+printf '888888\n' > "$kb_lockreport/.psr.lock.guard/pid"
+touch -t 200001010000 "$kb_lockreport/.psr.lock" "$kb_lockreport/.psr.lock.guard"
+set +e
+PROBLEM_SOLUTION_KB_ROOT="$kb_lockreport" "$DOCTOR" > "$tmp/lock-report.out" 2>&1
+lock_report_rc=$?
+set -e
+[[ "$lock_report_rc" -ne 0 ]] || fail "doctor reported ready with a leftover lock and dead guard"
+grep -Fq "leftover write lock" "$tmp/lock-report.out" || fail "doctor did not name the leftover lock"
+grep -Fq "rm -rf" "$tmp/lock-report.out" || fail "doctor did not print the recovery command"
+pass "残留锁与死亡 guard 使 doctor 失败并给出恢复命令"
+
+# V03 双星号代码保持原样，并可被检索
+kb_kwargs="$tmp/kb-kwargs"
+"$PSR" init "$kb_kwargs" >/dev/null
+mkdir -p "$kb_kwargs/records/2026"
+fence3='```'
+printf -- '---\nid: 2026-10-21-001\ntitle: "kwargs"\ndate: 2026-10-21\nstatus: solved\n---\n\n# kwargs\n\n## 根因分析\n\n%spython\ndef forward(**kwargs):\n    return kwargs\n%s\n' "$fence3" "$fence3" > "$kb_kwargs/records/2026/2026-10-21-001-kw.md"
+kw_out="$(LC_ALL=C awk -v root="$kb_kwargs" -v maxlines=20 -f "$SCRIPT_DIR/lib/record-fields.awk" "$kb_kwargs/records/2026/2026-10-21-001-kw.md" | grep -a '^@F	root')"
+printf '%s' "$kw_out" | grep -Fq 'def forward(**kwargs)' || fail "double asterisks were rewritten in code"
+PROBLEM_SOLUTION_KB_ROOT="$kb_kwargs" "$PSR" search '**kwargs' >/dev/null 2>&1 || fail "search could not find **kwargs"
+pass "双星号代码不被改写且可检索"
+
 printf '[ok] smoke test passed\n'

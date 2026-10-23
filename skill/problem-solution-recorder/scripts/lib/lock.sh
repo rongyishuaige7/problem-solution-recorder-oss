@@ -7,19 +7,20 @@
 #   trap 'psr_lock_release "$root"; exit 130' INT TERM HUP
 #
 # Design (why it is safe):
-#   - The mutex is `mkdir <root>/.psr.lock`; only one process can create it.
-#   - The lock path is NEVER renamed or moved away while it decides anything:
-#     removing it is the only automatic deletion, and that happens only while
-#     holding `.psr.lock.guard`, a second mkdir mutex held for microseconds.
-#   - The guard is never reclaimed automatically. A crashed guard holder leaves
-#     the guard behind, which blocks *reclaim* (not normal acquisition) until a
-#     human removes it; the timeout message names both paths. A stuck guard is
-#     a liveness problem, never a mutual-exclusion one.
+#   - Acquisition and stale-lock removal both run under `.psr.lock.guard`, a
+#     second `mkdir` mutex held only for a few syscalls. Because a new writer
+#     cannot create the lock without the guard, a reclaimer that checks a stale
+#     lock can no longer race with a normal release + re-acquire: the handoff
+#     is serialized too, not just reclaimer-vs-reclaimer.
+#   - The lock path is never renamed or moved: removal happens in place while
+#     holding the guard, so there is no window where the path is empty for
+#     someone else to claim.
+#   - The guard is never reclaimed automatically. A process killed exactly
+#     inside the guard leaves it behind and blocks writes until a human removes
+#     it; the timeout message prints the exact command, and doctor reports it.
+#     That is a liveness cost, never a mutual-exclusion one.
 #   - A stale lock is removed only when it is older than 300s AND its pid is
-#     gone. Because the guard serializes removals, two reclaimers cannot both
-#     delete, so one cannot delete the fresh lock created by the other.
-#   - Both directories carry `token` (`<pid>:<random>`) so release and guard
-#     removal only ever delete our own instance.
+#     gone. Release only removes the lock when its `token` still matches ours.
 #   - PSR_LOCK_RETRIES (default 50, 0.2s each) controls how long to wait.
 
 PSR_LOCK_NAME=".psr.lock"
@@ -99,35 +100,6 @@ psr_lock_release() {
   return 0
 }
 
-# 在 guard 保护下删除陈旧主锁；guard 是第二个 mkdir 互斥，短持有、不自动回收。
-psr_lock_reclaim_locked() {
-  local lock="$1"
-  local guard="$lock.guard"
-  local my_token
-
-  mkdir "$guard" 2>/dev/null || return 1
-  my_token="$(psr_lock_new_token)"
-  printf '%s\n' "$$" > "$guard/pid" 2>/dev/null || true
-  printf '%s
-' "$my_token" > "$guard/token" 2>/dev/null || true
-
-  if [[ -n "${PSR_LOCK_TEST_PAUSE_GUARD:-}" ]]; then
-    # 仅用于回归测试放大回收窗口；默认不生效。
-    sleep "$PSR_LOCK_TEST_PAUSE_GUARD"
-  fi
-
-  # 拿到 guard 后重新确认：仍是同一个陈旧实例才删除。
-  if [[ -d "$lock" ]] && psr_lock_is_stale "$lock"; then
-    printf 'Removing stale lock: %s\n' "$lock" >&2
-    rm -rf "$lock" 2>/dev/null || true
-  fi
-
-  if [[ "$(psr_lock_token_of "$guard")" == "$my_token" ]]; then
-    rm -rf "$guard" 2>/dev/null || true
-  fi
-  return 0
-}
-
 psr_lock_acquire() {
   local root="$1"
   local retries="${2:-${PSR_LOCK_RETRIES:-50}}"
@@ -147,18 +119,29 @@ psr_lock_acquire() {
   fi
 
   while :; do
-    if mkdir "$lock" 2>/dev/null; then
-      PSR_LOCK_TOKEN="$(psr_lock_new_token)"
-      printf '%s\n' "$$" > "$lock/pid"
-      printf '%s\n' "$PSR_LOCK_TOKEN" > "$lock/token"
-      PSR_LOCK_HELD=1
-      return 0
-    fi
+    # 取得 guard 才允许“检查/回收/创建”这三步；正常获取也走这里，
+    # 因此回收者的判断不会与一次正常的释放+获取交接交错。
+    if mkdir "$guard" 2>/dev/null; then
+      if [[ -d "$lock" ]] && psr_lock_is_stale "$lock"; then
+        if [[ -n "${PSR_LOCK_TEST_PAUSE_GUARD:-}" ]]; then
+          # 仅用于回归测试放大“判断与删除之间”的窗口；默认不生效。
+          sleep "$PSR_LOCK_TEST_PAUSE_GUARD"
+        fi
+        printf 'Removing stale lock: %s\n' "$lock" >&2
+        rm -rf "$lock" 2>/dev/null || true
+      fi
 
-    if [[ -d "$lock" ]] && psr_lock_is_stale "$lock"; then
-      # 只有拿到 guard 的进程可以删除陈旧锁；guard 不会被自动回收，
-      # 因此两个回收者不可能同时进入“删除”这一步。
-      psr_lock_reclaim_locked "$lock" || true
+      if mkdir "$lock" 2>/dev/null; then
+        PSR_LOCK_TOKEN="$(psr_lock_new_token)"
+        printf '%s\n' "$$" > "$lock/pid"
+        printf '%s\n' "$PSR_LOCK_TOKEN" > "$lock/token"
+        rm -rf "$guard" 2>/dev/null || true
+        PSR_LOCK_HELD=1
+        return 0
+      fi
+
+      # 锁仍被占用（或刚好被抢占）：释放 guard 后等待。
+      rm -rf "$guard" 2>/dev/null || true
     fi
 
     sleep 0.2
@@ -166,7 +149,7 @@ psr_lock_acquire() {
     if [[ "$waited" -gt "$retries" ]]; then
       printf 'Another writer holds the lock: %s\n' "$lock" >&2
       if [[ -d "$guard" ]]; then
-        printf 'A stale reclaim guard also exists: %s\n' "$guard" >&2
+        printf 'A reclaim guard is still present: %s\n' "$guard" >&2
       fi
       printf 'If no other process is running, remove them manually:\n' >&2
       printf '  rm -rf "%s" "%s"\n' "$lock" "$guard" >&2

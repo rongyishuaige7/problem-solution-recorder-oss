@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.6] - 2026-10-23
+
+### Fixed
+
+- Normal acquisition now takes the same guard as stale-lock removal. A reclaimer that
+  has read a stale lock can no longer race with the old owner releasing and a new writer
+  acquiring: the handoff is serialized too, not just reclaimer-vs-reclaimer. The lock
+  path is still never moved, so there is no empty-lock window.
+- `doctor` reports a leftover `.psr.lock` / `.psr.lock.guard` with a dead owner as a
+  failure and prints the exact `rm -rf` recovery command; a live owner is a warning.
+- Double asterisks in code are preserved: `def forward(**kwargs)` stays intact (only
+  paired `**bold**` markers are stripped), and `**kwargs` is searchable.
+- A query whose terms all land in long body text (outside the truncated display excerpt)
+  is labelled “正文” instead of “跨字段（正文）”.
+
+
 ## [0.8.5] - 2026-10-23
 
 ### Fixed
@@ -392,7 +408,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `agents/*.yaml` metadata for multiple runtimes.
 - GitHub Actions workflow for validation and smoke tests.
 
-[Unreleased]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.5...HEAD
+[Unreleased]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.6...HEAD
+[0.8.6]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.5...v0.8.6
 [0.8.5]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.4...v0.8.5
 [0.8.4]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.3...v0.8.4
 [0.8.3]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.2...v0.8.3

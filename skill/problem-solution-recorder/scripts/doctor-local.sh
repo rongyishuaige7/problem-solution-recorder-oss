@@ -254,6 +254,32 @@ if [[ -f "$index_path" ]]; then
   fi
 fi
 
+# 5) 残留写锁与回收 guard：存在时写入会被阻塞，doctor 必须报告。
+lock_path="$root/.psr.lock"
+guard_path="$root/.psr.lock.guard"
+if [[ -d "$lock_path" || -d "$guard_path" ]]; then
+  lock_pid=""
+  [[ -f "$lock_path/pid" ]] && lock_pid="$(cat "$lock_path/pid" 2>/dev/null || true)"
+  guard_pid=""
+  [[ -f "$guard_path/pid" ]] && guard_pid="$(cat "$guard_path/pid" 2>/dev/null || true)"
+  lock_alive=0
+  guard_alive=0
+  [[ -n "$lock_pid" ]] && kill -0 "$lock_pid" 2>/dev/null && lock_alive=1
+  [[ -n "$guard_pid" ]] && kill -0 "$guard_pid" 2>/dev/null && guard_alive=1
+  if [[ "$lock_alive" -eq 1 || "$guard_alive" -eq 1 ]]; then
+    printf '[warn] a writer appears to be running (lock pid=%s, guard pid=%s)\n' "${lock_pid:-none}" "${guard_pid:-none}"
+    warnings=$((warnings + 1))
+  else
+    printf '[fail] leftover write lock blocks writers:\n'
+    [[ -d "$lock_path" ]] && printf '  - %s\n' "$lock_path"
+    [[ -d "$guard_path" ]] && printf '  - %s\n' "$guard_path"
+    printf '  recovery: rm -rf "%s" "%s"\n' "$lock_path" "$guard_path"
+    failures=$((failures + 1))
+  fi
+else
+  printf '[ok] no leftover write lock\n'
+fi
+
 if [[ -x "$root/bin/web-check" ]]; then
   if command -v node >/dev/null 2>&1; then
     if web_out="$("$root/bin/web-check" 2>&1)"; then
