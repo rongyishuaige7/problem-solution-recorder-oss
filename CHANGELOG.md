@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.9] - 2026-10-23
+
+### Fixed
+
+- Table rows now run the same markup cleaning as ordinary lines after the structural
+  step: link targets are dropped in favour of their text and paired `**bold**` markers
+  are removed, while inline code keeps its pipes. Previously a table cell with a link or
+  bold text left the raw Markdown in the summary and the CLI index, so a URL-only term
+  matched the CLI but not the dashboard.
+
+
 ## [0.8.8] - 2026-10-23
 
 ### Fixed
@@ -434,7 +445,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `agents/*.yaml` metadata for multiple runtimes.
 - GitHub Actions workflow for validation and smoke tests.
 
-[Unreleased]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.8...HEAD
+[Unreleased]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.9...HEAD
+[0.8.9]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.8...v0.8.9
 [0.8.8]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.7...v0.8.8
 [0.8.7]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.6...v0.8.7
 [0.8.6]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.5...v0.8.6

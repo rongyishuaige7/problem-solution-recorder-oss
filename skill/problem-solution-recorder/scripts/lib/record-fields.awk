@@ -37,7 +37,21 @@ function emit(k, v) {
 }
 
 # 把一行正文并入当前章节；围栏内外共用同一套规则。
-# 表格行：先保护行内代码，再把单元格分隔符换成空格，最后还原代码。
+# 链接只留文本、成对粗体去标记；代码占位符不含这些字符，不会被误伤。
+function clean_markup(s,   label, inner) {
+  while (match(s, /\[[^]]*\]\([^)]*\)/)) {
+    label = substr(s, RSTART + 1, RLENGTH - 2)
+    sub(/\]\(.*/, "", label)
+    s = substr(s, 1, RSTART - 1) label substr(s, RSTART + RLENGTH)
+  }
+  while (match(s, /\*\*[^*]+\*\*/)) {
+    inner = substr(s, RSTART + 2, RLENGTH - 4)
+    s = substr(s, 1, RSTART - 1) inner substr(s, RSTART + RLENGTH)
+  }
+  return s
+}
+
+# 表格行：先保护行内代码，再把单元格分隔符换成空格，清理 Markdown，最后还原代码。
 function strip_table_row(raw,   s, n, i, p, t, code) {
   s = raw
   n = 0
@@ -49,6 +63,7 @@ function strip_table_row(raw,   s, n, i, p, t, code) {
   gsub(/[[:space:]]+/, " ", s)
   sub(/^ /, "", s)
   sub(/ $/, "", s)
+  s = clean_markup(s)
   for (i = 1; i <= n; i++) {
     t = "\001" i "\001"
     p = index(s, t)
@@ -117,17 +132,7 @@ function strip_line(s,   n, i, p, t, code) {
   gsub(/^[[:space:]]+/, "", s)
   gsub(/[[:space:]]+$/, "", s)
 
-  while (match(s, /\[[^]]*\]\([^)]*\)/)) {
-    label = substr(s, RSTART + 1, RLENGTH - 2)
-    sub(/\]\(.*/, "", label)
-    s = substr(s, 1, RSTART - 1) label substr(s, RSTART + RLENGTH)
-  }
-
-  # 只有成对的 **粗体** 去标记；**kwargs 这类代码保持原样。
-  while (match(s, /\*\*[^*]+\*\*/)) {
-    inner = substr(s, RSTART + 2, RLENGTH - 4)
-    s = substr(s, 1, RSTART - 1) inner substr(s, RSTART + RLENGTH)
-  }
+  s = clean_markup(s)
 
   for (i = 1; i <= n; i++) {
     t = "\001" i "\001"

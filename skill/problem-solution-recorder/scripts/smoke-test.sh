@@ -1143,4 +1143,26 @@ printf '%s' "$table_out" | grep -Fq 'ps aux|grep node' || fail "table row stripp
 PROBLEM_SOLUTION_KB_ROOT="$kb_table_code" "$PSR" search 'aux|grep' >/dev/null 2>&1 || fail "search could not find the pipe inside table code"
 pass "表格行内代码保留管道符并可检索"
 
+
+# ---------------------------------------------------------------- v0.8.9 回归
+# Y01 表格行同时含链接、粗体与行内代码时，清理规则必须与普通行一致
+kb_table_mix="$tmp/kb-table-mix"
+"$PSR" init "$kb_table_mix" >/dev/null
+mkdir -p "$kb_table_mix/records/2026"
+bt='`'
+printf -- '---\nid: 2026-10-21-001\ntitle: "表格混合"\ndate: 2026-10-21\nstatus: solved\n---\n\n# 表格混合\n\n## 根因分析\n\n| 项 | 说明 |\n|---|---|\n| 文档 | [设计文档](https://example.com/LINK_URL_TOKEN) 与 **粗体** |\n| 命令 | %sps aux|grep node%s |\n' "$bt" "$bt" > "$kb_table_mix/records/2026/2026-10-21-001-mix.md"
+mix_out="$(LC_ALL=C awk -v root="$kb_table_mix" -v maxlines=20 -f "$SCRIPT_DIR/lib/record-fields.awk" "$kb_table_mix/records/2026/2026-10-21-001-mix.md" | grep -a '^@F	root')"
+printf '%s' "$mix_out" | grep -Fq "设计文档" || fail "table link text was dropped"
+printf '%s' "$mix_out" | grep -Fq "粗体" || fail "table bold was not unwrapped"
+printf '%s' "$mix_out" | grep -Fq "ps aux|grep node" || fail "table inline code lost its pipe"
+printf '%s' "$mix_out" | grep -Fq "LINK_URL_TOKEN" && fail "table link target leaked into the summary"
+printf '%s' "$mix_out" | grep -Fq '\*\*' && fail "table bold markers leaked into the summary"
+set +e
+PROBLEM_SOLUTION_KB_ROOT="$kb_table_mix" "$PSR" search LINK_URL_TOKEN >/dev/null 2>&1
+mix_url_rc=$?
+set -e
+[[ "$mix_url_rc" -eq 1 ]] || fail "CLI matched a table link target that the page drops"
+PROBLEM_SOLUTION_KB_ROOT="$kb_table_mix" "$PSR" search "设计文档" >/dev/null 2>&1 || fail "CLI could not find table link text"
+pass "表格混合格式：链接只留文本、粗体去标记、代码保留管道符"
+
 printf '[ok] smoke test passed\n'
