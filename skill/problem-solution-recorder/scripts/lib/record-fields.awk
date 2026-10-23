@@ -37,18 +37,25 @@ function emit(k, v) {
 }
 
 # 把一行正文并入当前章节；围栏内外共用同一套规则。
-function add_line(raw,   line, key) {
+function add_line(raw, in_code,   line, key) {
   if (section == "") return
   key = map[section]
   if (key == "") return
-  line = strip_line(raw)
-  # 表格行也要保留证据：去掉竖线后按文本收录，跳过 |---|---| 分隔行。
-  if (line ~ /^\|/) {
-    gsub(/\|/, " ", line)
-    gsub(/[[:space:]]+/, " ", line)
-    sub(/^ /, "", line)
-    sub(/ $/, "", line)
-    if (line ~ /^[-: ]+$/) return
+  if (in_code) {
+    # 围栏内是代码字面量：只去首尾空白，不解释 Markdown。
+    line = raw
+    sub(/^[[:space:]]+/, "", line)
+    sub(/[[:space:]]+$/, "", line)
+  } else {
+    line = strip_line(raw)
+    # 表格行也要保留证据：去掉竖线后按文本收录，跳过 |---|---| 分隔行。
+    if (line ~ /^\|/) {
+      gsub(/\|/, " ", line)
+      gsub(/[[:space:]]+/, " ", line)
+      sub(/^ /, "", line)
+      sub(/ $/, "", line)
+      if (line ~ /^[-: ]+$/) return
+    }
   }
   if (line == "") return
   if (count >= maxlines) return
@@ -82,7 +89,14 @@ function reset() {
 
 # 与 web/generate-data.js 的 cleanMarkdown 保持同一套清理规则：
 # 去列表符号、链接只留文本、去行内代码/粗体标记；单个 * 属于内容，保留。
-function strip_line(s) {
+function strip_line(s,   n, i, p, t, code) {
+  # 行内代码先占位：其中的 ** 属于代码字面量，不能被当成粗体标记。
+  n = 0
+  while (match(s, /`[^`]*`/)) {
+    code[++n] = substr(s, RSTART + 1, RLENGTH - 2)
+    s = substr(s, 1, RSTART - 1) "\001" n "\001" substr(s, RSTART + RLENGTH)
+  }
+
   gsub(/^[[:space:]]*([-*]+|[0-9]+\.)[[:space:]]+/, "", s)
   gsub(/^[[:space:]]+/, "", s)
   gsub(/[[:space:]]+$/, "", s)
@@ -93,11 +107,16 @@ function strip_line(s) {
     s = substr(s, 1, RSTART - 1) label substr(s, RSTART + RLENGTH)
   }
 
-  gsub(/`/, "", s)
   # 只有成对的 **粗体** 去标记；**kwargs 这类代码保持原样。
   while (match(s, /\*\*[^*]+\*\*/)) {
     inner = substr(s, RSTART + 2, RLENGTH - 4)
     s = substr(s, 1, RSTART - 1) inner substr(s, RSTART + RLENGTH)
+  }
+
+  for (i = 1; i <= n; i++) {
+    t = "\001" i "\001"
+    p = index(s, t)
+    if (p > 0) s = substr(s, 1, p - 1) code[i] substr(s, p + length(t))
   }
   return s
 }
@@ -187,7 +206,7 @@ fm {
   }
   next
 }
-fence != "" { add_line($0); next }
+fence != "" { add_line($0, 1); next }
 
 /^##[[:space:]]+/ {
   flush_section()
@@ -197,7 +216,7 @@ fence != "" { add_line($0); next }
   next
 }
 
-{ add_line($0) }
+{ add_line($0, 0) }
 
 END {
   flush_section()

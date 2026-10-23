@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.7] - 2026-10-23
+
+### Fixed
+
+- The reclaim guard records its owner (`pid` + `token`) as soon as it is created, so
+  `doctor` can tell a writer paused mid-acquire from a leftover guard: a live owner is a
+  warning, only a dead owner is a failure with the recovery command.
+- Code literals survive Markdown cleaning: inside ``` or ~~~ fences, and inside inline
+  backticks, `**kwargs` is kept as written (only paired `**bold**` outside code is
+  unwrapped). The dashboard's `cleanMarkdown` follows the same fence-aware rules, so
+  `**kwargs` is found by both the CLI and the page.
+
+
 ## [0.8.6] - 2026-10-23
 
 ### Fixed
@@ -408,7 +421,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `agents/*.yaml` metadata for multiple runtimes.
 - GitHub Actions workflow for validation and smoke tests.
 
-[Unreleased]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.6...HEAD
+[Unreleased]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.7...HEAD
+[0.8.7]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.6...v0.8.7
 [0.8.6]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.5...v0.8.6
 [0.8.5]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.4...v0.8.5
 [0.8.4]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.3...v0.8.4

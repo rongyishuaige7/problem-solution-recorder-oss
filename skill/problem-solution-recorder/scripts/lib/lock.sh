@@ -122,6 +122,9 @@ psr_lock_acquire() {
     # 取得 guard 才允许“检查/回收/创建”这三步；正常获取也走这里，
     # 因此回收者的判断不会与一次正常的释放+获取交接交错。
     if mkdir "$guard" 2>/dev/null; then
+      # guard 也要有 owner：doctor 需要区分“活持有者暂停”和“残留 guard”。
+      printf '%s\n' "$$" > "$guard/pid" 2>/dev/null || true
+      printf '%s\n' "$(psr_lock_new_token)" > "$guard/token" 2>/dev/null || true
       if [[ -d "$lock" ]] && psr_lock_is_stale "$lock"; then
         if [[ -n "${PSR_LOCK_TEST_PAUSE_GUARD:-}" ]]; then
           # 仅用于回归测试放大“判断与删除之间”的窗口；默认不生效。

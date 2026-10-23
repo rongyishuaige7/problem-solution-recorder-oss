@@ -1066,4 +1066,49 @@ printf '%s' "$kw_out" | grep -Fq 'def forward(**kwargs)' || fail "double asteris
 PROBLEM_SOLUTION_KB_ROOT="$kb_kwargs" "$PSR" search '**kwargs' >/dev/null 2>&1 || fail "search could not find **kwargs"
 pass "双星号代码不被改写且可检索"
 
+
+# ---------------------------------------------------------------- v0.8.7 回归
+# W01 活 guard（持有者暂停在获取过程中）不应被 doctor 判为残留
+kb_guard_live="$tmp/kb-guard-live"
+"$PSR" init "$kb_guard_live" >/dev/null
+mkdir -p "$kb_guard_live/.psr.lock"
+printf '999999\n' > "$kb_guard_live/.psr.lock/pid"
+touch -t 200001010000 "$kb_guard_live/.psr.lock"
+cat > "$tmp/guard-live-holder.sh" <<GUARDEOF
+#!/usr/bin/env bash
+set -euo pipefail
+. "$SKILL_DIR/scripts/lib/lock.sh"
+PSR_LOCK_TEST_PAUSE_GUARD=2.0 psr_lock_acquire "$kb_guard_live" 100 || exit 9
+psr_lock_release "$kb_guard_live"
+GUARDEOF
+chmod +x "$tmp/guard-live-holder.sh"
+"$tmp/guard-live-holder.sh" & guard_live_pid=$!
+for _ in $(seq 1 300); do [[ -f "$kb_guard_live/.psr.lock.guard/pid" ]] && break; sleep 0.02; done
+[[ -f "$kb_guard_live/.psr.lock.guard/pid" ]] || fail "guard never recorded its owner"
+set +e
+PROBLEM_SOLUTION_KB_ROOT="$kb_guard_live" "$DOCTOR" > "$tmp/guard-live.out" 2>&1
+guard_live_rc=$?
+set -e
+guard_live_holder_rc=0
+wait "$guard_live_pid" || guard_live_holder_rc=$?
+[[ "$guard_live_holder_rc" -eq 0 ]] || fail "guard holder failed (rc=$guard_live_holder_rc)"
+[[ "$guard_live_rc" -eq 0 ]] || fail "doctor failed a live guard holder (rc=$guard_live_rc)"
+grep -Fq "[warn] a writer appears to be running" "$tmp/guard-live.out" || fail "doctor did not report the live guard as a warning"
+grep -Fq "leftover write lock" "$tmp/guard-live.out" && fail "doctor called a live guard leftover"
+pass "活 guard 被识别为进行中的写入，而不是残留"
+
+# W02 代码字面量（围栏与行内）保持 ** 原样
+kb_code_lit="$tmp/kb-code-literals"
+"$PSR" init "$kb_code_lit" >/dev/null
+mkdir -p "$kb_code_lit/records/2026"
+fence3='```'
+bt='`'
+printf -- '---\nid: 2026-10-21-001\ntitle: "代码字面量"\ndate: 2026-10-21\nstatus: solved\n---\n\n# 代码字面量\n\n## 根因分析\n\n%spython\ndef forward(**kwargs):\n    return target(**kwargs)\n%s\n\n行内 %sforward(**kwargs)%s 与 **粗体** 文本。\n' "$fence3" "$fence3" "$bt" "$bt" > "$kb_code_lit/records/2026/2026-10-21-001-lit.md"
+lit_out="$(LC_ALL=C awk -v root="$kb_code_lit" -v maxlines=50 -f "$SCRIPT_DIR/lib/record-fields.awk" "$kb_code_lit/records/2026/2026-10-21-001-lit.md" | grep -a '^@F	root')"
+printf '%s' "$lit_out" | grep -Fq 'def forward(**kwargs):' || fail "fenced **kwargs was rewritten"
+printf '%s' "$lit_out" | grep -Fq 'target(**kwargs)' || fail "second fenced **kwargs was rewritten"
+printf '%s' "$lit_out" | grep -Fq 'forward(**kwargs)' || fail "inline-code **kwargs was rewritten"
+printf '%s' "$lit_out" | grep -Fq '粗体' || fail "bold text was not unwrapped"
+pass "围栏与行内代码保留双星号，粗体仍去标记"
+
 printf '[ok] smoke test passed\n'
