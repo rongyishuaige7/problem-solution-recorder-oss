@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-10-23
+
+### Fixed
+
+- A reclaim marker with a live owner is never removed by age: only a confirmed-dead
+  owner (or a marker with no owner file, older than 60s) is cleaned, so a paused
+  reclaimer can no longer lose its marker and delete another writer's fresh lock.
+- HTML comments are stripped from the whole record before section validation, so a
+  comment that starts before the required headings and wraps all of them no longer
+  satisfies the archive check.
+- Fence parsing records the opening character and length in every parser
+  (`record-fields.awk`, `psr` validation, `generate-data.js`): a `~~~` line inside a
+  backtick fence no longer ends it, and the text after the fence is kept.
+- Search uses one contract on both sides: the canonical recall fields (title, id,
+  tools, tags, conclusion, signature, root, fix, verification, reuse, follow-ups) with
+  full section text. The CLI no longer stops at 20 lines, and the web search text no
+  longer includes non-recall sections such as 环境与关键配置.
+- The web generator treats `-`, `—`, `待补充` and `待填写` as empty, so a quick record
+  without a 复用经验 section no longer produces `lesson: "-"` and fails the web gate.
+- `doctor` prints `bin/web-check` diagnostics (first lines plus the recovery command)
+  instead of only counting a failure.
+- Web cards show every field that matched any term, so a query whose terms land in
+  different fields still explains itself.
+- A knowledge base without `node` reports Web sync as pending (exit 2) instead of
+  printing both “跳过同步” and “已同步”; a Markdown-only base stays silent.
+
+
 ## [0.8.2] - 2026-10-23
 
 ### Fixed
@@ -319,7 +346,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `agents/*.yaml` metadata for multiple runtimes.
 - GitHub Actions workflow for validation and smoke tests.
 
-[Unreleased]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.2...HEAD
+[Unreleased]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.3...HEAD
+[0.8.3]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.2...v0.8.3
 [0.8.2]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.7.0...v0.8.0

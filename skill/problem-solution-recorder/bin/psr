@@ -334,7 +334,7 @@ section_has_content() {
       if (length(line) >= 3 && substr(line, length(line) - 2) == "：") return 1
       return 0
     }
-    BEGIN { in_fence = 0; fence = ""; in_comment = 0 }
+    BEGIN { in_fence = 0; fence = ""; fence_len = 0; in_comment = 0 }
     $0 == "## " h { s = 1; next }
     s {
       line = $0
@@ -350,15 +350,22 @@ section_has_content() {
         next
       }
 
-      # 两种围栏（``` 与 ~~~）：围栏内的 ## 不是章节边界。
-      if (match(line, /^[[:space:]]*(```|~~~)/)) {
-        m = substr(line, RSTART + RLENGTH - 3, 3)
+      # 两种围栏（``` 与 ~~~）：按开围栏的字符与长度匹配关闭符，
+      # 反引号围栏里的 ~~~ 文本不会提前结束代码块。
+      if (match(line, /^[[:space:]]*(```+|~~~+)/)) {
+        m = substr(line, RSTART, RLENGTH)
+        sub(/^[[:space:]]+/, "", m)
+        ch = substr(m, 1, 1)
+        n = 0
+        while (substr(m, n + 1, 1) == ch) n++
         if (!in_fence) {
           in_fence = 1
-          fence = m
-        } else if (m == fence) {
+          fence = ch
+          fence_len = n
+        } else if (ch == fence && n >= fence_len) {
           in_fence = 0
           fence = ""
+          fence_len = 0
         }
         next
       }
@@ -461,6 +468,34 @@ fm_list_value() {
       exit
     }
   ' "$file"
+}
+
+# 把 HTML 注释整段替换成空行；章节识别必须看不到注释里的标题。
+strip_html_comments() {
+  local file="$1"
+  local out="$2"
+  LC_ALL=C awk '
+    BEGIN { in_c = 0 }
+    {
+      line = $0
+      res = ""
+      while (length(line) > 0) {
+        if (in_c) {
+          p = index(line, "-->")
+          if (p == 0) { line = ""; break }
+          line = substr(line, p + 3)
+          in_c = 0
+        } else {
+          p = index(line, "<!--")
+          if (p == 0) { res = res line; line = ""; break }
+          res = res substr(line, 1, p - 1)
+          line = substr(line, p + 4)
+          in_c = 1
+        }
+      }
+      print res
+    }
+  ' "$file" > "$out"
 }
 
 record_status() {
@@ -614,23 +649,29 @@ cmd_finalize() {
   done
 
   # ---- 按目标状态校验内容 ----
+  # 注释可能从章节之前开始并包住所有标题，先整段剥离再识别章节。
+  local clean_file
+  clean_file="$(mktemp "${TMPDIR:-/tmp}/psr-clean.XXXXXX")"
+  strip_html_comments "$file" "$clean_file"
   local missing=()
   case "$target_status" in
     solved)
-      section_has_content "$file" "根因分析" || missing+=("根因分析")
-      section_has_content "$file" "最终解决方案" || missing+=("最终解决方案")
-      section_has_content "$file" "验证方法" || missing+=("验证方法")
+      section_has_content "$clean_file" "根因分析" || missing+=("根因分析")
+      section_has_content "$clean_file" "最终解决方案" || missing+=("最终解决方案")
+      section_has_content "$clean_file" "验证方法" || missing+=("验证方法")
       ;;
     workaround)
-      section_has_content "$file" "最终解决方案" || missing+=("最终解决方案")
-      section_has_content "$file" "验证方法" || missing+=("验证方法")
-      section_has_content "$file" "限制与风险" || missing+=("限制与风险")
+      section_has_content "$clean_file" "最终解决方案" || missing+=("最终解决方案")
+      section_has_content "$clean_file" "验证方法" || missing+=("验证方法")
+      section_has_content "$clean_file" "限制与风险" || missing+=("限制与风险")
       ;;
     unresolved)
-      section_has_content "$file" "原始现象" || missing+=("原始现象")
-      section_has_content "$file" "后续事项" || missing+=("后续事项")
+      section_has_content "$clean_file" "原始现象" || missing+=("原始现象")
+      section_has_content "$clean_file" "后续事项" || missing+=("后续事项")
       ;;
   esac
+
+  rm -f "$clean_file"
 
   if [[ ${#missing[@]} -gt 0 ]]; then
     printf '[fail] 无法归档为 %s：以下章节没有有效内容\n' "$target_status" >&2
@@ -825,7 +866,7 @@ records_tsv() {
   [[ ${#files[@]} -gt 0 ]] || return 0
 
   stream="$(mktemp "${TMPDIR:-/tmp}/psr-records.XXXXXX")"
-  if ! LC_ALL=C awk -v root="$root" -v maxlines=20 -f "$LIB/record-fields.awk" "${files[@]}" > "$stream" 2>/dev/null; then
+  if ! LC_ALL=C awk -v root="$root" -v maxlines=200 -f "$LIB/record-fields.awk" "${files[@]}" > "$stream" 2>/dev/null; then
     rm -f "$stream"
     return 2
   fi

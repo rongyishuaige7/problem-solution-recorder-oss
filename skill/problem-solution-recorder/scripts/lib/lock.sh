@@ -91,9 +91,14 @@ psr_lock_acquire() {
         fi
         rage=$(( $(date +%s) - $(psr_lock_mtime "$reclaim") ))
         [[ "$rage" -lt 0 ]] && rage=0
-        if [[ -n "$rpid" ]] && ! kill -0 "$rpid" 2>/dev/null; then
-          rm -rf "$reclaim" 2>/dev/null || true
+        if [[ -n "$rpid" ]]; then
+          # 有 owner 时只能按“确证死亡”回收：活着的回收者即使暂停很久也不能抢，
+          # 否则第二个回收者会删掉它的标记，进而删掉别人刚建立的新锁。
+          if ! kill -0 "$rpid" 2>/dev/null; then
+            rm -rf "$reclaim" 2>/dev/null || true
+          fi
         elif [[ "$rage" -gt 60 ]]; then
+          # 没有 owner 文件 = 回收者在写 pid 之前崩溃；只有这种窗口才按时间清理。
           rm -rf "$reclaim" 2>/dev/null || true
         fi
       fi
@@ -111,7 +116,10 @@ psr_lock_acquire() {
             printf 'Removing stale lock: %s\n' "$lock" >&2
             rm -rf "$lock" 2>/dev/null || true
           fi
-          rm -rf "$reclaim" 2>/dev/null || true
+          # 只清理自己的标记；若已被他人接管则不要动。
+          if [[ "$(cat "$reclaim/pid" 2>/dev/null || true)" == "$$" ]]; then
+            rm -rf "$reclaim" 2>/dev/null || true
+          fi
         fi
 
         waited=$(( waited + 1 ))

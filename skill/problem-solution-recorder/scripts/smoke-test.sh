@@ -594,17 +594,21 @@ fi
 exit 1
 EOF
 chmod +x "$tmp/lock-holder.sh" "$tmp/lock-contender.sh"
-PSR_LOCK_TEST_PAUSE=2.0 "$tmp/lock-holder.sh" "$SKILL_DIR" "$kb_lock" & lock_holder_pid=$!
+PSR_LOCK_TEST_PAUSE=3.0 "$tmp/lock-holder.sh" "$SKILL_DIR" "$kb_lock" & lock_holder_pid=$!
 # 等到回收者真正进入回收窗口再让竞争者尝试，避免用固定 sleep 赌调度。
 for _ in $(seq 1 500); do
   [[ -d "$kb_lock/.psr.lock.reclaim" ]] && break
   sleep 0.02
 done
 [[ -d "$kb_lock/.psr.lock.reclaim" ]] || fail "holder never took the reclaim marker"
-if "$tmp/lock-contender.sh" "$SKILL_DIR" "$kb_lock"; then
-  fail "contender entered while a stale lock was being reclaimed"
-fi
-wait "$lock_holder_pid"
+set +e
+"$tmp/lock-contender.sh" "$SKILL_DIR" "$kb_lock"
+lock_contender_rc=$?
+lock_holder_rc=0
+wait "$lock_holder_pid" || lock_holder_rc=$?
+set -e
+[[ "$lock_holder_rc" -eq 0 ]] || fail "holder failed to acquire the reclaimed lock (rc=$lock_holder_rc)"
+[[ "$lock_contender_rc" -ne 0 ]] || fail "contender entered while a stale lock was being reclaimed"
 pass "陈旧锁回收互斥，回收窗口内其他写入者被阻塞"
 
 # 2) 不可读记录目录不得改写摘要
@@ -846,5 +850,72 @@ if grep -qE '^\|[[:space:]]*[0-9]{4}-[0-9]{2}-[0-9]{2}' "$kb_rebuild/INDEX.md"; 
   fail "--allow-empty left stale rows in INDEX.md"
 fi
 pass "空库可重建；删除最后一条需 --allow-empty"
+
+
+# ---------------------------------------------------------------- v0.8.3 回归
+# S01 活着的回收者即使长时间暂停，其标记也不能被按时间抢占
+kb_live="$tmp/kb-live-reclaim"
+mkdir -p "$kb_live/.psr.lock"
+printf '999999\n' > "$kb_live/.psr.lock/pid"
+touch -t 200001010000 "$kb_live/.psr.lock"
+cat > "$tmp/live-holder.sh" <<LIVEHOLDER
+#!/usr/bin/env bash
+set -euo pipefail
+. "$SKILL_DIR/scripts/lib/lock.sh"
+PSR_LOCK_TEST_PAUSE=2 psr_lock_acquire "$kb_live" 100 || exit 9
+psr_lock_release "$kb_live"
+LIVEHOLDER
+chmod +x "$tmp/live-holder.sh"
+"$tmp/live-holder.sh" & live_holder=$!
+for _ in $(seq 1 300); do [[ -d "$kb_live/.psr.lock.reclaim" ]] && break; sleep 0.02; done
+[[ -d "$kb_live/.psr.lock.reclaim" ]] || fail "live reclaimer never took the marker"
+touch -t 200001010000 "$kb_live/.psr.lock.reclaim"
+set +e
+bash -c '. "$1/scripts/lib/lock.sh"; psr_lock_acquire "$2" 2 && { psr_lock_release "$2"; exit 0; }; exit 1' _ "$SKILL_DIR" "$kb_live"
+live_contender=$?
+set -e
+wait "$live_holder"
+[[ "$live_contender" -ne 0 ]] || fail "a live reclaimer's aged marker was stolen"
+pass "活回收者的标记不会被按时间抢占"
+
+# S02 注释从章节之前开始、包住全部必填章节时不得归档
+kb_hidden="$tmp/kb-hidden-comment"
+"$PSR" init "$kb_hidden" >/dev/null
+mkdir -p "$kb_hidden/records/2026"
+printf -- '---\nid: 2026-10-21-001\ntitle: "注释包裹"\ndate: 2026-10-21\nstatus: draft\n---\n\n# 注释包裹\n\n<!--\n## 根因分析\nCOMMENT_ONLY_ROOT\n\n## 最终解决方案\nCOMMENT_ONLY_FIX\n\n## 验证方法\nCOMMENT_ONLY_VERIFY\n-->\n' > "$kb_hidden/records/2026/2026-10-21-001-hidden.md"
+set +e
+PROBLEM_SOLUTION_KB_ROOT="$kb_hidden" "$PSR" finalize 2026-10-21-001 --status solved >/dev/null 2>&1
+hidden_rc=$?
+set -e
+[[ "$hidden_rc" -ne 0 ]] || fail "headings hidden inside an earlier HTML comment were accepted"
+pass "章节前的 HTML 注释包住标题时拒绝归档"
+
+# S03 反引号围栏里的 ~~~ 文本不得提前结束围栏
+kb_mixed="$tmp/kb-mixed-fence"
+"$PSR" init "$kb_mixed" >/dev/null
+mkdir -p "$kb_mixed/records/2026"
+fence4='````'
+printf -- '---\nid: 2026-10-21-001\ntitle: "混合围栏"\ndate: 2026-10-21\nstatus: solved\n---\n\n# 混合围栏\n\n## 根因分析\n\nROOT_BEFORE\n\n%smarkdown\n~~~bash\n## 伪章节\nFENCE_ONLY_TOKEN\n~~~\n%s\n\nROOT_AFTER_MIXED_TOKEN\n' "$fence4" "$fence4" > "$kb_mixed/records/2026/2026-10-21-001-mixed.md"
+mixed_out="$(LC_ALL=C awk -v root="$kb_mixed" -v maxlines=50 -f "$SCRIPT_DIR/lib/record-fields.awk" "$kb_mixed/records/2026/2026-10-21-001-mixed.md" | grep -a '^@F	root')"
+printf '%s' "$mixed_out" | grep -Fq "ROOT_AFTER_MIXED_TOKEN" || fail "a tilde fence inside a backtick fence ended the outer fence early"
+printf '%s' "$mixed_out" | grep -Fq "ROOT_BEFORE" || fail "mixed fence lost the text before the fence"
+pass "混合围栏按字符与长度匹配，围栏后正文保留"
+
+# S04 检索契约：非召回章节不命中，第 21 行仍命中
+kb_contract="$tmp/kb-search-contract"
+"$PSR" init "$kb_contract" >/dev/null
+mkdir -p "$kb_contract/records/2026"
+{
+  printf -- '---\nid: 2026-10-21-001\ntitle: "检索契约"\ndate: 2026-10-21\nstatus: solved\ntags: [x]\n---\n\n# 检索契约\n\n## 环境与关键配置\n\nENV_ONLY_TOKEN\n\n## 根因分析\n\n'
+  printf 'ROOT_LINE_%s\n' $(seq 1 20)
+  printf 'ROOT_LINE_21_TOKEN\n'
+} > "$kb_contract/records/2026/2026-10-21-001-contract.md"
+set +e
+PROBLEM_SOLUTION_KB_ROOT="$kb_contract" "$PSR" search ENV_ONLY_TOKEN >/dev/null 2>&1
+env_rc=$?
+set -e
+[[ "$env_rc" -eq 1 ]] || fail "CLI searched a non-recall section (env), diverging from the web contract"
+PROBLEM_SOLUTION_KB_ROOT="$kb_contract" "$PSR" search ROOT_LINE_21_TOKEN >/dev/null 2>&1 || fail "CLI stopped at line 20 of a section"
+pass "检索契约：共同字段 + 全文（不限 20 行）"
 
 printf '[ok] smoke test passed\n'

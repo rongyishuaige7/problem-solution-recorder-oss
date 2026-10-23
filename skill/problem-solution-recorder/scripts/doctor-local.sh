@@ -255,9 +255,15 @@ if [[ -f "$index_path" ]]; then
 fi
 
 if [[ -x "$root/bin/web-check" ]]; then
-  printf '[ok] bin/web-check\n'
   if command -v node >/dev/null 2>&1; then
-    "$root/bin/web-check" >/dev/null 2>&1 || failures=$((failures + 1))
+    if web_out="$("$root/bin/web-check" 2>&1)"; then
+      printf '[ok] bin/web-check\n'
+    else
+      printf '[fail] bin/web-check\n'
+      printf '%s\n' "$web_out" | sed -n '1,12p' | sed 's/^/  /'
+      printf '  recovery: node web/generate-data.js && bin/web-check\n'
+      failures=$((failures + 1))
+    fi
   else
     printf '[info] node not found; web data consistency not verified\n'
   fi

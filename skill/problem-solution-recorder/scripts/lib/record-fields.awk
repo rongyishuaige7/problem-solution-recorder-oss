@@ -67,7 +67,7 @@ function emit_fm(   k, v) {
 }
 
 function reset() {
-  fm = 0; pending = ""; list = ""; fence = 0; block = 0
+  fm = 0; pending = ""; list = ""; fence = ""; fence_len = 0; block = 0
   section = ""; out = ""; count = 0; items = ""
   delete fmv
 }
@@ -149,8 +149,23 @@ fm {
   next
 }
 
-/^[[:space:]]*(```|~~~)/ { fence = !fence; next }
-fence { add_line($0); next }
+# 围栏必须记录开围栏的字符与长度：反引号围栏里的 ~~~ 文本不是关闭符。
+/^[[:space:]]*(```+|~~~+)/ {
+  line = $0
+  sub(/^[[:space:]]+/, "", line)
+  ch = substr(line, 1, 1)
+  n = 0
+  while (substr(line, n + 1, 1) == ch) n++
+  if (fence == "") {
+    fence = ch
+    fence_len = n
+  } else if (ch == fence && n >= fence_len) {
+    fence = ""
+    fence_len = 0
+  }
+  next
+}
+fence != "" { add_line($0); next }
 
 /^##[[:space:]]+/ {
   flush_section()
