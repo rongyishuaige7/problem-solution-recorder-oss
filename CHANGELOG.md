@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.4] - 2026-10-23
+
+### Fixed
+
+- Lock removal now goes through an instance-identity protocol: every lock and reclaim
+  directory carries a `token`, and deletion first renames the directory to a unique
+  quarantine name, then compares the moved token with the observed one. A mismatch puts
+  the directory back instead of deleting it, so a stale read can no longer remove a
+  marker another reclaimer has just created (and, through it, a live lock). Release uses
+  the same token check before removing.
+- Section detection tracks fences from the start of the body, so headings inside a code
+  example no longer count as real sections; a record whose only headings live in a
+  Markdown example is refused instead of archived.
+- Search reads every line of a section (the 200-line cap is gone) and the dashboard
+  filters on the same recall fields only: `severity`, `status` and `date` are no longer
+  searchable on the page. Long-section hits that fall outside the truncated display
+  excerpt are labelled “正文”.
+
+### Changed
+
+- A knowledge base's `qs today`, `qs week`, `qs month`, `qs pattern` and `qs web-sync`
+  treat “no web configured” (exit 3) as a normal skip; a configured but failing sync
+  still reports the saved file and the recovery command.
+
+
 ## [0.8.3] - 2026-10-23
 
 ### Fixed
@@ -346,7 +371,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `agents/*.yaml` metadata for multiple runtimes.
 - GitHub Actions workflow for validation and smoke tests.
 
-[Unreleased]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.3...HEAD
+[Unreleased]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.4...HEAD
+[0.8.4]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.3...v0.8.4
 [0.8.3]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.2...v0.8.3
 [0.8.2]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.0...v0.8.1

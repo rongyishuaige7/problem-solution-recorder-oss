@@ -918,4 +918,57 @@ set -e
 PROBLEM_SOLUTION_KB_ROOT="$kb_contract" "$PSR" search ROOT_LINE_21_TOKEN >/dev/null 2>&1 || fail "CLI stopped at line 20 of a section"
 pass "检索契约：共同字段 + 全文（不限 20 行）"
 
+
+# ---------------------------------------------------------------- v0.8.4 回归
+# T01 按旧 token 删除已被替换的回收标记必须被拒绝
+kb_tok="$tmp/kb-token-guard"
+mkdir -p "$kb_tok/.psr.lock.reclaim"
+printf '999999\n' > "$kb_tok/.psr.lock.reclaim/pid"
+printf 'dead:token\n' > "$kb_tok/.psr.lock.reclaim/token"
+rm -rf "$kb_tok/.psr.lock.reclaim"
+mkdir -p "$kb_tok/.psr.lock.reclaim"
+printf '%s\n' "$$" > "$kb_tok/.psr.lock.reclaim/pid"
+printf 'live:token\n' > "$kb_tok/.psr.lock.reclaim/token"
+set +e
+bash -c '. "$1/scripts/lib/lock.sh"; psr_lock_drop_instance "$2/.psr.lock.reclaim" "dead:token"' _ "$SKILL_DIR" "$kb_tok"
+token_guard_rc=$?
+set -e
+[[ "$token_guard_rc" -ne 0 ]] || fail "a stale token deleted a replaced live reclaim marker"
+[[ "$(cat "$kb_tok/.psr.lock.reclaim/token")" == "live:token" ]] || fail "the live reclaim marker was not restored"
+pass "回收标记按实例 token 删除，替换后的活标记不受影响"
+
+# T02 代码示例中的章节标题不算真实章节
+kb_code="$tmp/kb-code-example"
+"$PSR" init "$kb_code" >/dev/null
+mkdir -p "$kb_code/records/2026"
+fence3='```'
+{
+  printf -- '---\nid: 2026-10-21-001\ntitle: "代码示例"\ndate: 2026-10-21\nstatus: draft\n---\n\n# 代码示例\n\n%smarkdown\n## 根因分析\nEXAMPLE_ROOT\n\n## 最终解决方案\nEXAMPLE_FIX\n\n## 验证方法\nEXAMPLE_VERIFY\n%s\n' "$fence3" "$fence3"
+} > "$kb_code/records/2026/2026-10-21-001-example.md"
+set +e
+PROBLEM_SOLUTION_KB_ROOT="$kb_code" "$PSR" finalize 2026-10-21-001 --status solved >/dev/null 2>&1
+code_rc=$?
+set -e
+[[ "$code_rc" -ne 0 ]] || fail "headings inside a code example were accepted as real sections"
+grep -q '^status: draft' "$kb_code/records/2026/2026-10-21-001-example.md" || fail "status changed despite code-example-only headings"
+pass "代码示例里的同名章节不参与归档校验"
+
+# T03 检索不限行；非召回元数据（severity）不参与
+kb_long="$tmp/kb-search-long"
+"$PSR" init "$kb_long" >/dev/null
+mkdir -p "$kb_long/records/2026"
+{
+  printf -- '---\nid: 2026-10-21-001\ntitle: "长文"\ndate: 2026-10-21\nstatus: solved\nseverity: medium\ntags: [x]\n---\n\n# 长文\n\n## 根因分析\n\n'
+  i=1
+  while [[ "$i" -le 200 ]]; do printf 'LINE_%s\n' "$i"; i=$(( i + 1 )); done
+  printf 'ROOT_LINE_201_TOKEN\n'
+} > "$kb_long/records/2026/2026-10-21-001-long.md"
+PROBLEM_SOLUTION_KB_ROOT="$kb_long" "$PSR" search ROOT_LINE_201_TOKEN >/dev/null 2>&1 || fail "search stopped before line 201"
+set +e
+PROBLEM_SOLUTION_KB_ROOT="$kb_long" "$PSR" search medium >/dev/null 2>&1
+severity_rc=$?
+set -e
+[[ "$severity_rc" -eq 1 ]] || fail "search matched a non-recall metadata field (severity)"
+pass "检索全文不限行，且只使用共同召回字段"
+
 printf '[ok] smoke test passed\n'

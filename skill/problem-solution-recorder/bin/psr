@@ -334,24 +334,21 @@ section_has_content() {
       if (length(line) >= 3 && substr(line, length(line) - 2) == "：") return 1
       return 0
     }
-    BEGIN { in_fence = 0; fence = ""; fence_len = 0; in_comment = 0 }
-    $0 == "## " h { s = 1; next }
-    s {
+    function real_content(line,   t) {
+      t = line
+      sub(/^[[:space:]]+/, "", t)
+      sub(/[[:space:]]+$/, "", t)
+      if (t == "") return 0
+      if (t ~ /^#/) return 0
+      if (t ~ /^[{}[\].,;]+$/) return 0
+      if (placeholder(t)) return 0
+      return 1
+    }
+    BEGIN { in_fence = 0; fence = ""; fence_len = 0; s = 0 }
+    {
       line = $0
 
-      # 多行 HTML 注释：整段忽略（含跨行）。
-      if (in_comment) {
-        if (index(line, "-->") > 0) in_comment = 0
-        next
-      }
-      if (match(line, /^[[:space:]]*<!--/)) {
-        rest = substr(line, RSTART + RLENGTH)
-        if (index(rest, "-->") == 0) in_comment = 1
-        next
-      }
-
-      # 两种围栏（``` 与 ~~~）：按开围栏的字符与长度匹配关闭符，
-      # 反引号围栏里的 ~~~ 文本不会提前结束代码块。
+      # 围栏身份先于章节识别：代码示例里的 “## 根因分析” 不是章节。
       if (match(line, /^[[:space:]]*(```+|~~~+)/)) {
         m = substr(line, RSTART, RLENGTH)
         sub(/^[[:space:]]+/, "", m)
@@ -370,23 +367,22 @@ section_has_content() {
         next
       }
 
-      if (!in_fence && line ~ /^## /) exit
-
       if (in_fence) {
-        sub(/^[[:space:]]+/, "", line)
-        sub(/[[:space:]]+$/, "", line)
-        if (line ~ /^#/) next
-        if (line ~ /^[{}[\].,;]+$/) next
-        if (placeholder(line)) next
+        if (s && real_content(line)) { found = 1; exit }
+        next
+      }
+
+      if (line == "## " h) { s = 1; next }
+      if (s && line ~ /^## /) exit
+
+      if (s) {
+        t = line
+        gsub(/^[[:space:]*-]+/, "", t)
+        gsub(/[[:space:]]+$/, "", t)
+        if (placeholder(t)) next
         found = 1
         exit
       }
-
-      gsub(/^[[:space:]*-]+/, "", line)
-      gsub(/[[:space:]]+$/, "", line)
-      if (placeholder(line)) next
-      found = 1
-      exit
     }
     END { exit(found ? 0 : 1) }
   ' "$file"
@@ -866,7 +862,7 @@ records_tsv() {
   [[ ${#files[@]} -gt 0 ]] || return 0
 
   stream="$(mktemp "${TMPDIR:-/tmp}/psr-records.XXXXXX")"
-  if ! LC_ALL=C awk -v root="$root" -v maxlines=200 -f "$LIB/record-fields.awk" "${files[@]}" > "$stream" 2>/dev/null; then
+  if ! LC_ALL=C awk -v root="$root" -v maxlines=1000000 -f "$LIB/record-fields.awk" "${files[@]}" > "$stream" 2>/dev/null; then
     rm -f "$stream"
     return 2
   fi
