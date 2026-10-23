@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.8] - 2026-10-23
+
+### Fixed
+
+- `doctor` treats a lock or guard directory that has no owner file yet as an
+  in-progress writer (warning) rather than a leftover (failure); only a directory with
+  no owner that is older than 60s is reported as leftover. This closes the mkdir→write
+  window where a live holder was told to delete its own guard.
+- Table rows protect inline code before structural processing: a cell such as
+  `` `ps aux|grep node` `` keeps its pipe, while the cell separators are still removed.
+  The same query now works in the CLI and the dashboard.
+
+
 ## [0.8.7] - 2026-10-23
 
 ### Fixed
@@ -421,7 +434,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `agents/*.yaml` metadata for multiple runtimes.
 - GitHub Actions workflow for validation and smoke tests.
 
-[Unreleased]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.7...HEAD
+[Unreleased]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.8...HEAD
+[0.8.8]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.7...v0.8.8
 [0.8.7]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.6...v0.8.7
 [0.8.6]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.5...v0.8.6
 [0.8.5]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.4...v0.8.5

@@ -37,6 +37,26 @@ function emit(k, v) {
 }
 
 # 把一行正文并入当前章节；围栏内外共用同一套规则。
+# 表格行：先保护行内代码，再把单元格分隔符换成空格，最后还原代码。
+function strip_table_row(raw,   s, n, i, p, t, code) {
+  s = raw
+  n = 0
+  while (match(s, /`[^`]*`/)) {
+    code[++n] = substr(s, RSTART + 1, RLENGTH - 2)
+    s = substr(s, 1, RSTART - 1) "\001" n "\001" substr(s, RSTART + RLENGTH)
+  }
+  gsub(/\|/, " ", s)
+  gsub(/[[:space:]]+/, " ", s)
+  sub(/^ /, "", s)
+  sub(/ $/, "", s)
+  for (i = 1; i <= n; i++) {
+    t = "\001" i "\001"
+    p = index(s, t)
+    if (p > 0) s = substr(s, 1, p - 1) code[i] substr(s, p + length(t))
+  }
+  return s
+}
+
 function add_line(raw, in_code,   line, key) {
   if (section == "") return
   key = map[section]
@@ -46,16 +66,12 @@ function add_line(raw, in_code,   line, key) {
     line = raw
     sub(/^[[:space:]]+/, "", line)
     sub(/[[:space:]]+$/, "", line)
+  } else if (raw ~ /^[[:space:]]*\|/) {
+    # 表格行：保留证据，但代码里的竖线不能被当成分隔符。
+    line = strip_table_row(raw)
+    if (line ~ /^[-: ]+$/) return
   } else {
     line = strip_line(raw)
-    # 表格行也要保留证据：去掉竖线后按文本收录，跳过 |---|---| 分隔行。
-    if (line ~ /^\|/) {
-      gsub(/\|/, " ", line)
-      gsub(/[[:space:]]+/, " ", line)
-      sub(/^ /, "", line)
-      sub(/ $/, "", line)
-      if (line ~ /^[-: ]+$/) return
-    }
   }
   if (line == "") return
   if (count >= maxlines) return

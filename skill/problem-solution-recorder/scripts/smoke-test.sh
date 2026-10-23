@@ -1111,4 +1111,36 @@ printf '%s' "$lit_out" | grep -Fq 'forward(**kwargs)' || fail "inline-code **kwa
 printf '%s' "$lit_out" | grep -Fq '粗体' || fail "bold text was not unwrapped"
 pass "围栏与行内代码保留双星号，粗体仍去标记"
 
+
+# ---------------------------------------------------------------- v0.8.8 回归
+# X01 guard 初始化窗口（无 pid）按“进行中”处理，只有确证陈旧才失败
+kb_guard_init="$tmp/kb-guard-init"
+"$PSR" init "$kb_guard_init" >/dev/null
+mkdir -p "$kb_guard_init/.psr.lock.guard"
+set +e
+PROBLEM_SOLUTION_KB_ROOT="$kb_guard_init" "$DOCTOR" > "$tmp/guard-init.out" 2>&1
+guard_init_rc=$?
+set -e
+[[ "$guard_init_rc" -eq 0 ]] || fail "doctor failed a guard that is still initializing (rc=$guard_init_rc)"
+grep -Fq "initializing" "$tmp/guard-init.out" || fail "doctor did not describe the initializing guard"
+touch -t 200001010000 "$kb_guard_init/.psr.lock.guard"
+set +e
+PROBLEM_SOLUTION_KB_ROOT="$kb_guard_init" "$DOCTOR" > "$tmp/guard-old.out" 2>&1
+guard_old_rc=$?
+set -e
+[[ "$guard_old_rc" -ne 0 ]] || fail "doctor ignored an old guard without an owner"
+grep -Fq "leftover write lock" "$tmp/guard-old.out" || fail "doctor did not report the old guard as leftover"
+pass "guard 无 owner：新目录告警、陈旧目录失败"
+
+# X02 表格里的行内代码保留管道符
+kb_table_code="$tmp/kb-table-code"
+"$PSR" init "$kb_table_code" >/dev/null
+mkdir -p "$kb_table_code/records/2026"
+bt='`'
+printf -- '---\nid: 2026-10-21-001\ntitle: "表格代码"\ndate: 2026-10-21\nstatus: solved\n---\n\n# 表格代码\n\n## 根因分析\n\n| 命令 | 说明 |\n|---|---|\n| %sps aux|grep node%s | 进程检查 |\n' "$bt" "$bt" > "$kb_table_code/records/2026/2026-10-21-001-table.md"
+table_out="$(LC_ALL=C awk -v root="$kb_table_code" -v maxlines=20 -f "$SCRIPT_DIR/lib/record-fields.awk" "$kb_table_code/records/2026/2026-10-21-001-table.md" | grep -a '^@F	root')"
+printf '%s' "$table_out" | grep -Fq 'ps aux|grep node' || fail "table row stripped the pipe inside inline code"
+PROBLEM_SOLUTION_KB_ROOT="$kb_table_code" "$PSR" search 'aux|grep' >/dev/null 2>&1 || fail "search could not find the pipe inside table code"
+pass "表格行内代码保留管道符并可检索"
+
 printf '[ok] smoke test passed\n'

@@ -255,6 +255,9 @@ if [[ -f "$index_path" ]]; then
 fi
 
 # 5) 残留写锁与回收 guard：存在时写入会被阻塞，doctor 必须报告。
+doctor_mtime() {
+  stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || printf '0'
+}
 lock_path="$root/.psr.lock"
 guard_path="$root/.psr.lock.guard"
 if [[ -d "$lock_path" || -d "$guard_path" ]]; then
@@ -264,10 +267,28 @@ if [[ -d "$lock_path" || -d "$guard_path" ]]; then
   [[ -f "$guard_path/pid" ]] && guard_pid="$(cat "$guard_path/pid" 2>/dev/null || true)"
   lock_alive=0
   guard_alive=0
+  lock_unknown=0
+  guard_unknown=0
   [[ -n "$lock_pid" ]] && kill -0 "$lock_pid" 2>/dev/null && lock_alive=1
   [[ -n "$guard_pid" ]] && kill -0 "$guard_pid" 2>/dev/null && guard_alive=1
-  if [[ "$lock_alive" -eq 1 || "$guard_alive" -eq 1 ]]; then
-    printf '[warn] a writer appears to be running (lock pid=%s, guard pid=%s)\n' "${lock_pid:-none}" "${guard_pid:-none}"
+
+  # 目录刚建、pid 还没写入的窗口：无法证明已死，按“进行中”处理。
+  now_ts="$(date +%s)"
+  if [[ -d "$lock_path" && -z "$lock_pid" ]]; then
+    lock_age=$(( now_ts - $(doctor_mtime "$lock_path") ))
+    [[ "$lock_age" -le 60 ]] && lock_unknown=1
+  fi
+  if [[ -d "$guard_path" && -z "$guard_pid" ]]; then
+    guard_age=$(( now_ts - $(doctor_mtime "$guard_path") ))
+    [[ "$guard_age" -le 60 ]] && guard_unknown=1
+  fi
+
+  if [[ "$lock_alive" -eq 1 || "$guard_alive" -eq 1 || "$lock_unknown" -eq 1 || "$guard_unknown" -eq 1 ]]; then
+    if [[ "$lock_alive" -eq 1 || "$guard_alive" -eq 1 ]]; then
+      printf '[warn] a writer appears to be running (lock pid=%s, guard pid=%s)\n' "${lock_pid:-none}" "${guard_pid:-none}"
+    else
+      printf '[warn] a lock or guard is initializing (no owner written yet)\n'
+    fi
     warnings=$((warnings + 1))
   else
     printf '[fail] leftover write lock blocks writers:\n'
