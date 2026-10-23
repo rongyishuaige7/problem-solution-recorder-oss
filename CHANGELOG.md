@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.10] - 2026-10-23
+
+### Fixed
+
+- The table regression used `grep -F '\*\*'`, which matches a literal backslash and
+  could never detect a leaked `**bold**` marker. It now checks for `**粗体**`; a mutation
+  that skips bold unwrapping fails the assertion, and the unmutated run passes.
+
+
 ## [0.8.9] - 2026-10-23
 
 ### Fixed
@@ -445,7 +454,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `agents/*.yaml` metadata for multiple runtimes.
 - GitHub Actions workflow for validation and smoke tests.
 
-[Unreleased]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.9...HEAD
+[Unreleased]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.10...HEAD
+[0.8.10]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.9...v0.8.10
 [0.8.9]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.8...v0.8.9
 [0.8.8]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.7...v0.8.8
 [0.8.7]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.6...v0.8.7

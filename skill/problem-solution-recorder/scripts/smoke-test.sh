@@ -1156,7 +1156,7 @@ printf '%s' "$mix_out" | grep -Fq "设计文档" || fail "table link text was dr
 printf '%s' "$mix_out" | grep -Fq "粗体" || fail "table bold was not unwrapped"
 printf '%s' "$mix_out" | grep -Fq "ps aux|grep node" || fail "table inline code lost its pipe"
 printf '%s' "$mix_out" | grep -Fq "LINK_URL_TOKEN" && fail "table link target leaked into the summary"
-printf '%s' "$mix_out" | grep -Fq '\*\*' && fail "table bold markers leaked into the summary"
+printf '%s' "$mix_out" | grep -Fq '**粗体**' && fail "table bold markers leaked into the summary"
 set +e
 PROBLEM_SOLUTION_KB_ROOT="$kb_table_mix" "$PSR" search LINK_URL_TOKEN >/dev/null 2>&1
 mix_url_rc=$?
