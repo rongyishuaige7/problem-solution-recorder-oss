@@ -3,7 +3,7 @@
 > 面向 AI 工具和独立开发者的 Markdown 问题解决记忆库。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
-[![Skill version](https://img.shields.io/badge/skill-0.6.0-blue)](./skill/problem-solution-recorder/SKILL.md)
+[![Skill version](https://img.shields.io/badge/skill-0.7.0-blue)](./skill/problem-solution-recorder/SKILL.md)
 
 [![English README](https://img.shields.io/badge/docs-English-0f62fe)](README.md)
 中文说明

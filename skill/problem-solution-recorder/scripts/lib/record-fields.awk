@@ -39,7 +39,9 @@ function flush_section(   key) {
   if (section == "") return
   key = map[section]
   if (key != "" && out != "") emit(key, out)
-  section = ""; out = ""; count = 0
+  # 后续事项逐条保留（含 [ ]/[x]），供复盘聚合使用。
+  if (key == "follow" && items != "") emit("follow_items", items)
+  section = ""; out = ""; count = 0; items = ""
 }
 
 function emit_fm(   k, v) {
@@ -52,7 +54,7 @@ function emit_fm(   k, v) {
 
 function reset() {
   fm = 0; pending = ""; list = ""; fence = 0; block = 0
-  section = ""; out = ""; count = 0
+  section = ""; out = ""; count = 0; items = ""
   delete fmv
 }
 
@@ -152,6 +154,7 @@ fence { next }
   if (line == "" || line ~ /^\|/) next
   if (count >= maxlines) next
   out = (out == "" ? line : out "; " line)
+  if (key == "follow") items = (items == "" ? line : items "\036" line)
   count++
 }
 

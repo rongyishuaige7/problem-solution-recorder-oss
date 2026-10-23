@@ -461,4 +461,109 @@ pass "psr 完整路径：空库 → 子目录快记 → finalize → 双索引 �
 # 恢复全局环境变量，供后续用例使用
 export PROBLEM_SOLUTION_KB_ROOT="$kb"
 
+# ---------------------------------------------------------------- 检索与复盘
+kb_sr="$tmp/kb-search"
+"$PSR" init "$kb_sr" >/dev/null
+mkdir -p "$kb_sr/records/2026"
+cat > "$kb_sr/records/2026/2026-10-21-001-alpha.md" <<'EOF'
+---
+id: 2026-10-21-001
+title: "Alpha timeout"
+date: 2026-10-21
+status: solved
+tools: [codex]
+tags: [mcp]
+---
+
+# Alpha timeout
+
+## 一句话结论
+
+Alpha 的结论。
+
+## 原始现象
+
+请求超时。
+
+## 根因分析
+
+连接池过小。
+
+## 最终解决方案
+
+调大连接池。
+
+## 验证方法
+
+20 次请求 0 失败。
+
+## 后续事项
+
+- [ ] 观察一周
+- [x] 更新文档
+EOF
+cat > "$kb_sr/records/2026/2026-10-21-002-beta.md" <<'EOF'
+---
+id: 2026-10-21-002
+title: "Beta timeout"
+date: 2026-10-21
+status: draft
+tools: [curl]
+tags: [mcp]
+---
+
+# Beta timeout
+
+## 一句话结论
+
+-
+
+## 原始现象
+
+还没定位。
+EOF
+
+export PROBLEM_SOLUTION_KB_ROOT="$kb_sr"
+search_all="$("$PSR" search timeout --limit 5)"
+printf '%s' "$search_all" | grep -Fq "Alpha timeout" || fail "search missed a matching title"
+printf '%s' "$search_all" | grep -Fq "[draft]" || fail "search did not mark drafts"
+printf '%s' "$search_all" | grep -Fq "草稿（未验证" || fail "search did not warn about drafts"
+
+search_solved="$("$PSR" search timeout --status solved --limit 5)"
+printf '%s' "$search_solved" | grep -Fq "Alpha timeout" || fail "status filter dropped the solved record"
+printf '%s' "$search_solved" | grep -Fq "Beta timeout" && fail "status filter kept a draft"
+
+[[ "$("$PSR" search timeout --limit 1 | grep -c '^1\.')" -eq 1 ]] || fail "--limit did not cap results"
+
+"$PSR" search 'time[o]ut' --regex --limit 1 >/dev/null || fail "regex search failed"
+set +e
+"$PSR" search '[' --regex >/dev/null 2>&1
+bad_re_rc=$?
+"$PSR" search zzz-not-found >/dev/null 2>&1
+no_hit_rc=$?
+set -e
+[[ "$bad_re_rc" -eq 2 ]] || fail "invalid regex exited $bad_re_rc (expected 2)"
+[[ "$no_hit_rc" -eq 1 ]] || fail "no results exited $no_hit_rc (expected 1)"
+pass "检索：多词 AND、状态筛选、草稿标识、正则与错误码"
+
+review_file="$kb_sr/reviews/2026-10-21.md"
+"$PSR" review --day 2026-10-21 >/dev/null
+[[ -f "$review_file" ]] || fail "review did not create the period file"
+grep -Fq "Alpha timeout" "$review_file" || fail "review missed a record in the period"
+grep -Fq -- "- [ ] 观察一周" "$review_file" || fail "review lost open follow-ups"
+grep -Fq -- "- [x] 更新文档" "$review_file" || fail "review lost completed follow-ups"
+grep -Fq "已完成事项" "$review_file" || fail "review did not separate completed items"
+cp "$review_file" "$tmp/review-before"
+"$PSR" review --day 2026-10-21 >/dev/null
+cmp -s "$tmp/review-before" "$review_file" || fail "second review run changed the file"
+printf '\n手写复盘备注\n' >> "$review_file"
+"$PSR" review --day 2026-10-21 >/dev/null
+grep -Fq "手写复盘备注" "$review_file" || fail "review overwrote hand-written notes"
+open_out="$("$PSR" review --open)"
+printf '%s' "$open_out" | grep -Fq "观察一周" || fail "review --open missed an open item"
+printf '%s' "$open_out" | grep -Fq "更新文档" && fail "review --open listed a completed item"
+pass "复盘：周期记录、未完成/已完成分离、来源、幂等与手写保留"
+
+unset PROBLEM_SOLUTION_KB_ROOT
+
 printf '[ok] smoke test passed\n'

@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-22
+
+### Added
+
+- `psr search`: literal (default) or `--regex` search over title, id, problem signature,
+  root cause, fix, verification, lessons, tags, tools, and follow-ups. Whitespace-separated
+  terms are ANDed; results are scored by field and recency, capped by `--limit` (default 5).
+  Filters: `--status`, `--tool`, `--tag`, `--since`, `--until`. Drafts are marked and
+  labelled unverified. Exit codes distinguish no results (1) from a failed scan (2).
+- `psr review`: weekly/monthly/daily retrospectives with statistics, period records,
+  repeated tags/tools, open and completed follow-ups (kept separate), and method
+  candidates; every line carries its source. Generated content is marker-scoped, so
+  hand-written notes survive and unchanged runs are byte-identical.
+- `psr review --open`: unfinished follow-ups across all records with sources.
+- `record-fields.awk` also emits `follow_items`, preserving `[ ]`/`[x]` state per item.
+
+
 ## [0.6.0] - 2026-10-22
 
 ### Added
@@ -196,7 +213,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `agents/*.yaml` metadata for multiple runtimes.
 - GitHub Actions workflow for validation and smoke tests.
 
-[Unreleased]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.4.0...v0.5.0

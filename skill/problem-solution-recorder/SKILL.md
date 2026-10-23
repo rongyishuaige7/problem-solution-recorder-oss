@@ -1,6 +1,6 @@
 ---
 name: problem-solution-recorder
-version: 0.6.0
+version: 0.7.0
 license: MIT
 description: Maintain a configurable problem-solution knowledge base for solved incidents, debugging sessions, reusable troubleshooting patterns, and periodic reviews. Use when the user asks to record, archive, review, summarize, search, or preserve a solved issue; when a multi-step debugging task involving CLI tools, MCP, APIs, permissions, configs, dependencies, build errors, adapters, or AI tool behavior is completed; or when the user wants to reuse lessons from previous incidents.
 metadata:
@@ -44,6 +44,30 @@ secret check, and reports each result. Tool-owned index cells (`草稿`/`draft`/
 `待填写`) are updated; human cells such as `已解决（审计）` are kept and reported as a
 conflict when they disagree with the machine status. If a later step fails, the
 record is already saved and the message includes its id plus the retry command.
+
+## Search And Review
+
+```bash
+psr search "MCP timeout" --status solved --limit 5
+psr search 'time[o]ut' --regex
+psr review --week 2026-W43 [--dry-run]
+psr review --open
+```
+
+- Search is literal by default; whitespace-separated terms are ANDed. `--regex` treats
+  the whole query as one extended regex. Filters: `--status`, `--tool`, `--tag`,
+  `--since`, `--until`; `--limit` defaults to 5.
+- Results show title, id/date/tools, why it matched, a verification excerpt, and the
+  source path. Drafts are marked `[draft]` and labelled as unverified.
+- Exit codes: `0` results found, `1` no results, `2` the scan could not run (invalid
+  regex, unreadable records).
+- `psr review` writes `reviews/<period>.md` with statistics, period records, repeated
+  tags/tools, open follow-ups, completed follow-ups (kept out of the todo list), and
+  method candidates. Every line carries its source record.
+- Generated review content sits between `<!-- PSR:BEGIN REVIEW -->` and
+  `<!-- PSR:END REVIEW -->`; text outside the markers (hand-written notes) is preserved,
+  and an unchanged run leaves the file byte-identical.
+- `psr review --open` lists unfinished `[ ]` items across all records with sources.
 
 ## Resolve The Knowledge Base
 
