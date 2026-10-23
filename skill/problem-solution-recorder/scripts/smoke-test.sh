@@ -612,7 +612,7 @@ if [[ "$(id -u)" -ne 0 ]]; then
   "$PSR" init "$kb_enum" >/dev/null
   mkdir -p "$kb_enum/records/2026"
   printf -- '---\nid: 2026-10-21-001\ntitle: "枚举"\ndate: 2026-10-21\nstatus: solved\n---\n\n# 枚举\n\n## 根因分析\n\n真实根因。\n' > "$kb_enum/records/2026/2026-10-21-001-enum.md"
-  "$PSR" index >/dev/null
+  PROBLEM_SOLUTION_KB_ROOT="$kb_enum" "$PSR" index >/dev/null
   cp "$kb_enum/AI_SUMMARY_INDEX.md" "$tmp/enum-before"
   chmod 000 "$kb_enum/records/2026"
   set +e
