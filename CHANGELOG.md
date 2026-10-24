@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.12] - 2026-10-23
+
+### Added
+
+- `scripts/generate-review.sh` is the single implementation of periodic review
+  generation and merging: it builds the statistics, record list, repeated problems,
+  open/closed follow-ups and method candidates, then merges the generated block between
+  the PSR markers, preserving hand notes, backing up hand-written files, and refusing
+  malformed markers. `psr review` delegates to it, and `sync-kb-lib.sh` vendors it as
+  `<kb>/bin/generate-review.sh`.
+
+### Changed
+
+- A knowledge base's `qs today`, `qs week` and `qs month` now call the same generator, so
+  they write exactly the document `psr review --day/--week/--month` writes (verified
+  byte-identical with the timestamp normalised). Re-running refreshes only the generated
+  block and keeps hand notes; `--force` is still accepted but no longer needed.
+
+
 ## [0.8.11] - 2026-10-23
 
 ### Added
@@ -473,7 +492,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `agents/*.yaml` metadata for multiple runtimes.
 - GitHub Actions workflow for validation and smoke tests.
 
-[Unreleased]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.11...HEAD
+[Unreleased]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.12...HEAD
+[0.8.12]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.11...v0.8.12
 [0.8.11]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.10...v0.8.11
 [0.8.10]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.9...v0.8.10
 [0.8.9]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.8...v0.8.9

@@ -1217,4 +1217,16 @@ else
   printf '[skip] web-check 文本指纹（未安装 node）\n'
 fi
 
+
+# ---------------------------------------------------------------- v0.8.12 回归
+# 共享复盘生成器：--dry-run 只打印、不落盘
+kb_dry="$tmp/kb-review-dry"
+"$PSR" init "$kb_dry" >/dev/null
+mkdir -p "$kb_dry/records/2026"
+printf -- '---\nid: 2026-10-01-001\ntitle: "dry"\ndate: 2026-10-01\nstatus: solved\n---\n\n# dry\n\n## 根因分析\n根因。\n' > "$kb_dry/records/2026/2026-10-01-001-dry.md"
+PROBLEM_SOLUTION_KB_ROOT="$kb_dry" "$PSR" review --week 2026-W40 --dry-run > "$tmp/review-dry.out" 2>&1 || fail "review --dry-run failed"
+[[ -f "$kb_dry/reviews/2026-W40.md" ]] && fail "review --dry-run wrote a file"
+grep -Fq '<!-- PSR:BEGIN REVIEW -->' "$tmp/review-dry.out" || fail "review --dry-run did not print the generated block"
+pass "复盘 --dry-run 只打印不落盘"
+
 printf '[ok] smoke test passed\n'
