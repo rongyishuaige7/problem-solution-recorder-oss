@@ -1212,11 +1212,51 @@ JSEOF
   set -e
   [[ "$webcheck_bad_rc" -eq 1 ]] || fail "web-check missed a same-field text drift (rc=$webcheck_bad_rc)"
   grep -Fq "文本从第" "$tmp/webcheck-bad.out" || fail "web-check did not describe the text drift"
-  pass "web-check 发现同字段文本漂移"
+
+  WEBCHECK_ROOT_TEXT="配置见" node "$kb_web/web/generate-data.js"
+  set +e
+  WEBCHECK_ROOT_TEXT="配置见" "$kb_web/bin/web-check" > "$tmp/webcheck-short.out" 2>&1
+  webcheck_short_rc=$?
+  set -e
+  [[ "$webcheck_short_rc" -eq 1 ]] || fail "web-check missed truncated page content (rc=$webcheck_short_rc)"
+  grep -Fq "缺失" "$tmp/webcheck-short.out" || fail "web-check did not report the missing content"
+
+  if [[ "$(id -u)" -ne 0 ]]; then
+    chmod 000 "$kb_web/records"
+    set +e
+    "$kb_web/bin/web-check" > "$tmp/webcheck-find.out" 2>&1
+    webcheck_find_rc=$?
+    set -e
+    chmod 755 "$kb_web/records"
+    [[ "$webcheck_find_rc" -eq 2 ]] || fail "web-check treated a failed enumeration as an empty library (rc=$webcheck_find_rc)"
+    grep -Fq "读取 records 失败" "$tmp/webcheck-find.out" || fail "web-check did not report the enumeration failure"
+  fi
+  pass "web-check 发现同字段文本漂移、内容缺失与枚举失败"
 else
   printf '[skip] web-check 文本指纹（未安装 node）\n'
 fi
 
+
+# 复盘：旧任务不得用旧快照覆盖新结果
+kb_review_race="$tmp/kb-review-race"
+"$PSR" init "$kb_review_race" >/dev/null
+mkdir -p "$kb_review_race/records/2026"
+printf -- '---\nid: 2026-10-01-001\ntitle: "竞态"\ndate: 2026-10-01\nstatus: draft\n---\n\n# 竞态\n\n## 根因分析\n根因。\n' > "$kb_review_race/records/2026/2026-10-01-001-race.md"
+PSR_REVIEW_TEST_PAUSE_AFTER_BUILD=1.5 "$SCRIPT_DIR/generate-review.sh" "$kb_review_race" week 2026-W40 > "$tmp/race-a.out" 2>&1 &
+race_a_pid=$!
+for _ in $(seq 1 300); do [[ -d "$kb_review_race/.psr.lock" ]] && break; sleep 0.02; done
+[[ -d "$kb_review_race/.psr.lock" ]] || fail "review generator never took the lock"
+awk '{ if ($0 == "status: draft") print "status: solved"; else print }' \
+  "$kb_review_race/records/2026/2026-10-01-001-race.md" > "$tmp/race-record.md"
+mv "$tmp/race-record.md" "$kb_review_race/records/2026/2026-10-01-001-race.md"
+"$SCRIPT_DIR/generate-review.sh" "$kb_review_race" week 2026-W40 > "$tmp/race-b.out" 2>&1
+race_b_rc=$?
+race_a_rc=0
+wait "$race_a_pid" || race_a_rc=$?
+[[ "$race_a_rc" -eq 0 && "$race_b_rc" -eq 0 ]] || fail "review race commands failed (A=$race_a_rc B=$race_b_rc)"
+grep -Fq "状态分布：solved 1" "$kb_review_race/reviews/2026-W40.md" || fail "a stale review snapshot overwrote the newer result"
+[[ -d "$kb_review_race/.psr.lock" ]] && fail "review generator left the lock behind"
+pass "复盘旧快照不覆盖新结果，且释放写锁"
 
 # ---------------------------------------------------------------- v0.8.12 回归
 # 共享复盘生成器：--dry-run 只打印、不落盘

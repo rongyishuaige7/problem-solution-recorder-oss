@@ -68,6 +68,21 @@ tmpd="$(mktemp -d "${TMPDIR:-/tmp}/psr-review.XXXXXX")"
 REVIEW_TMPDIR="$tmpd"
 trap 'rm -rf "${REVIEW_TMPDIR:-}"' EXIT
 
+# 先拿写锁再读记录：否则“旧任务”会带着旧快照在锁外等待，
+# 恢复后把新任务刚写好的复盘覆盖回去。
+# shellcheck source=/dev/null
+. "$LIB/lock.sh"
+REVIEW_LOCK_ROOT="$root"
+trap 'psr_lock_release "$REVIEW_LOCK_ROOT" 2>/dev/null || true; rm -rf "${REVIEW_TMPDIR:-}"' EXIT
+trap 'psr_lock_release "$REVIEW_LOCK_ROOT" 2>/dev/null || true; rm -rf "${REVIEW_TMPDIR:-}"; exit 130' INT TERM HUP
+psr_lock_acquire "$root" || die "获取写锁失败"
+
+if [[ -n "${PSR_REVIEW_TEST_PAUSE:-}" ]]; then
+  # 仅用于回归测试放大持锁窗口；默认不生效。
+  sleep "$PSR_REVIEW_TEST_PAUSE"
+fi
+
+
 list="$tmpd/list"
 if ! psr_list_records "$root/records" "$list"; then
   printf 'generate-review: 读取记录失败，未写入复盘\n' >&2
@@ -213,19 +228,16 @@ endm='<!-- PSR:END REVIEW -->'
 generated="$block"
 file="$root/reviews/$key.md"
 
+if [[ -n "${PSR_REVIEW_TEST_PAUSE_AFTER_BUILD:-}" ]]; then
+  # 仅用于回归测试：模拟“旧任务已算完、尚未写入”的窗口（此时应已持锁）。
+  sleep "$PSR_REVIEW_TEST_PAUSE_AFTER_BUILD"
+fi
+
 if [[ "$dry_run" -eq 1 ]]; then
   printf '%s\n\n%s\n' "$begin" "$generated"
   printf '%s\n' "$endm"
   exit 0
 fi
-
-# 复盘写入纳入共享写锁，避免与 finalize / 手工编辑交叉。
-# shellcheck source=/dev/null
-. "$LIB/lock.sh"
-REVIEW_LOCK_ROOT="$root"
-trap 'psr_lock_release "$REVIEW_LOCK_ROOT" 2>/dev/null || true; rm -rf "${REVIEW_TMPDIR:-}"' EXIT
-trap 'psr_lock_release "$REVIEW_LOCK_ROOT" 2>/dev/null || true; rm -rf "${REVIEW_TMPDIR:-}"; exit 130' INT TERM HUP
-psr_lock_acquire "$root" || die "获取写锁失败"
 
 mkdir -p "$root/reviews"
 

@@ -39,10 +39,15 @@ trap 'rm -rf "$tmp"' EXIT
 
 node "$GEN" --check || die "web/data.js 已过期，先运行 node web/generate-data.js"
 
+if ! find "$ROOT/records" -type f -name '*.md' 2>"$tmp/find.err" | sort > "$tmp/files.txt"; then
+  sed -n '1,3p' "$tmp/find.err" | sed 's/^/  /' >&2 || true
+  die "读取 records 失败，无法确认记录清单"
+fi
+
 files=()
 while IFS= read -r f; do
   files+=("$f")
-done < <(find "$ROOT/records" -type f -name '*.md' | sort)
+done < "$tmp/files.txt"
 
 if [[ ${#files[@]} -eq 0 ]]; then
   printf 'web-check: 没有记录\n'
@@ -50,7 +55,7 @@ if [[ ${#files[@]} -eq 0 ]]; then
 fi
 
 # 与页面数据独立：canonical 解析器给出 id/date/status/tags 与正文字段。
-LC_ALL=C awk -v root="$ROOT" -v maxlines=20 -f "$LIB" "${files[@]}" 2>/dev/null |
+LC_ALL=C awk -v root="$ROOT" -v maxlines=1000000 -f "$LIB" "${files[@]}" 2>/dev/null |
   LC_ALL=C awk -F'\t' '
     function flush() {
       if (rel == "") return
@@ -97,20 +102,26 @@ const normalizeTokens = (value, limit = 40) =>
     // 标题记号、表格竖线、列表符号是格式噪声：两端可能保留或去掉，不应算文本漂移。
     .replace(/[;；,，。.、|#]+/g, " ")
     .split(/\s+/)
-    .map((token) => token.replace(/^[-:]+|[-:]+$/g, ""))
+    // 摘要截断会在末尾加省略号；它不属于正文，去掉后再比较。
+    .map((token) => token.replace(/…+$/g, "").replace(/^[-:]+|[-:]+$/g, ""))
     .filter(Boolean)
     .filter((token) => !/^[-:]+$/.test(token))
     .slice(0, limit);
 
-// 页面字段是 280 字摘要，只有确实发生截断时，末尾的半个词才不算漂移。
+// 解析器给全量章节；页面字段是 280 字摘要。未截断时词序列必须完全一致，
+// 截断时才允许页面是解析器的前缀（且末尾半个词不算漂移）。
 const tokenDrift = (left, right, rightTruncated) => {
   const n = Math.min(left.length, right.length);
   for (let i = 0; i < n; i += 1) {
     if (left[i] === right[i]) continue;
-    if (i === n - 1 && rightTruncated) return -1;
+    // 只有最后一个词确实是“被截断的前缀”才放过，不能掩盖完全不同的文本。
+    if (i === n - 1 && rightTruncated && left[i].startsWith(right[i])) return -1;
     return i;
   }
-  return -1;
+  if (left.length === right.length) return -1;
+  if (rightTruncated && left.length > right.length) return -1;
+  // 未截断却长度不同：页面漏了内容（或凭空多了内容）。
+  return n;
 };
 
 for (const record of data.records) {
@@ -149,8 +160,10 @@ for (const record of data.records) {
     const pageTokens = normalizeTokens(pageText);
     const at = tokenDrift(refTokens, pageTokens, pageText.length >= 280);
     if (at >= 0) {
+      const pageWord = at < pageTokens.length ? pageTokens[at] : "（缺失）";
+      const refWord = at < refTokens.length ? refTokens[at] : "（缺失）";
       problems.push(
-        `${record.id}: ${pageKey} 文本从第 ${at + 1} 个词起不一致（页面="${pageTokens[at]}" 解析器="${refTokens[at]}"）`
+        `${record.id}: ${pageKey} 文本从第 ${at + 1} 个词起不一致（页面="${pageWord}" 解析器="${refWord}"）`
       );
     }
   }

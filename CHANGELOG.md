@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.13] - 2026-10-23
+
+### Fixed
+
+- The review generator takes the write lock before it reads the records. A task that
+  computed a snapshot from older records can no longer wait outside the lock and then
+  overwrite the review a newer task just wrote; the whole read-compute-write cycle is
+  serialised, and the exit traps release both the lock and the temporary directory.
+- `web-check` compares the full section against the page field instead of only the shared
+  prefix: an untruncated page must match word for word, so “alpha beta gamma → alpha” is
+  reported as missing content, and a 280-character field that differs from the parser is
+  no longer excused as truncation. Only a genuine prefix ending in the excerpt ellipsis
+  is accepted as truncation.
+- `web-check` fails with exit 2 when the records directory cannot be enumerated; a failed
+  `find` is no longer reported as “no records”.
+
+
 ## [0.8.12] - 2026-10-23
 
 ### Added
@@ -492,7 +509,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `agents/*.yaml` metadata for multiple runtimes.
 - GitHub Actions workflow for validation and smoke tests.
 
-[Unreleased]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.12...HEAD
+[Unreleased]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.13...HEAD
+[0.8.13]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.12...v0.8.13
 [0.8.12]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.11...v0.8.12
 [0.8.11]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.10...v0.8.11
 [0.8.10]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.9...v0.8.10
