@@ -1269,4 +1269,56 @@ PROBLEM_SOLUTION_KB_ROOT="$kb_dry" "$PSR" review --week 2026-W40 --dry-run > "$t
 grep -Fq '<!-- PSR:BEGIN REVIEW -->' "$tmp/review-dry.out" || fail "review --dry-run did not print the generated block"
 pass "复盘 --dry-run 只打印不落盘"
 
+
+# ---------------------------------------------------------------- v0.8.14 回归
+# 只读库（0555）上的 --dry-run 不得申请写锁
+kb_ro="$tmp/kb-review-readonly"
+"$PSR" init "$kb_ro" >/dev/null
+mkdir -p "$kb_ro/records/2026"
+printf -- '---\nid: 2026-10-01-001\ntitle: "只读"\ndate: 2026-10-01\nstatus: solved\n---\n\n# 只读\n\n## 根因分析\n根因。\n' > "$kb_ro/records/2026/2026-10-01-001-ro.md"
+chmod 555 "$kb_ro"
+set +e
+PROBLEM_SOLUTION_KB_ROOT="$kb_ro" "$PSR" review --week 2026-W40 --dry-run > "$tmp/ro-dry.out" 2>&1
+ro_dry_rc=$?
+set -e
+chmod 755 "$kb_ro"
+[[ "$ro_dry_rc" -eq 0 ]] || fail "review --dry-run failed on a read-only library (rc=$ro_dry_rc)"
+grep -Fq '<!-- PSR:BEGIN REVIEW -->' "$tmp/ro-dry.out" || fail "read-only dry-run printed no review block"
+pass "只读库可以 --dry-run 预览"
+
+# 280 字但无省略号：不是截断，必须逐词一致
+kb_long="$tmp/kb-webcheck-long"
+"$PSR" init "$kb_long" >/dev/null
+mkdir -p "$kb_long/web" "$kb_long/records/2026" "$kb_long/bin/lib"
+cp "$SCRIPT_DIR/lib/record-fields.awk" "$kb_long/bin/lib/record-fields.awk"
+cp "$SCRIPT_DIR/web-check" "$kb_long/bin/web-check"; chmod +x "$kb_long/bin/web-check"
+many="$(awk 'BEGIN { for (i = 1; i < 120; i++) printf "w%s ", i }')"
+printf -- '---\nid: 2026-10-21-001\ntitle: "长章节"\ndate: 2026-10-21\nstatus: solved\n---\n\n# 长章节\n\n## 根因分析\n\n%s\n' "$many" > "$kb_long/records/2026/2026-10-21-001-long.md"
+cat > "$kb_long/web/generate-data.js" <<'JSEOF'
+const fs = require("fs");
+if (process.argv.includes("--check")) process.exit(0);
+const record = {id:"2026-10-21-001",date:"2026-10-21",status:"solved",tags:[],tools:[],
+  root_cause: process.env.ROOT_TEXT, final_fix:"", verification:"", lesson:"", search_text:""};
+fs.writeFileSync(__dirname+"/data.js","window.KB_DATA = "+JSON.stringify({records:[record]})+";\n");
+JSEOF
+long_full="$(printf '%s' "$many" | sed 's/ $//')"
+long_280="$(printf '%s' "$long_full" | cut -c1-280)"
+long_trunc="$(printf '%s' "$long_full" | cut -c1-279)…"
+long_extra="$(printf '%s' "$long_full" | cut -c1-160) EXTRA…"
+
+run_long() {
+  local name="$1" text="$2" want="$3" rc
+  ROOT_TEXT="$text" node "$kb_long/web/generate-data.js"
+  set +e
+  "$kb_long/bin/web-check" > "$tmp/long.out" 2>&1
+  rc=$?
+  set -e
+  [[ "$rc" -eq "$want" ]] || fail "web-check $name: rc=$rc (expected $want): $(tail -1 "$tmp/long.out")"
+}
+run_long "full" "$long_full" 0
+run_long "280-no-ellipsis" "$long_280" 1
+run_long "truncated-with-ellipsis" "$long_trunc" 0
+run_long "extra-word-after-prefix" "$long_extra" 1
+pass "280 字无省略号按内容比较，真实截断才放过"
+
 printf '[ok] smoke test passed\n'

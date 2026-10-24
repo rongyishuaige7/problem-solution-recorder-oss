@@ -70,16 +70,19 @@ trap 'rm -rf "${REVIEW_TMPDIR:-}"' EXIT
 
 # 先拿写锁再读记录：否则“旧任务”会带着旧快照在锁外等待，
 # 恢复后把新任务刚写好的复盘覆盖回去。
-# shellcheck source=/dev/null
-. "$LIB/lock.sh"
-REVIEW_LOCK_ROOT="$root"
-trap 'psr_lock_release "$REVIEW_LOCK_ROOT" 2>/dev/null || true; rm -rf "${REVIEW_TMPDIR:-}"' EXIT
-trap 'psr_lock_release "$REVIEW_LOCK_ROOT" 2>/dev/null || true; rm -rf "${REVIEW_TMPDIR:-}"; exit 130' INT TERM HUP
-psr_lock_acquire "$root" || die "获取写锁失败"
+# --dry-run 是只读预览：不加锁，只读库（0555）也能跑。
+if [[ "$dry_run" -eq 0 ]]; then
+  # shellcheck source=/dev/null
+  . "$LIB/lock.sh"
+  REVIEW_LOCK_ROOT="$root"
+  trap 'psr_lock_release "$REVIEW_LOCK_ROOT" 2>/dev/null || true; rm -rf "${REVIEW_TMPDIR:-}"' EXIT
+  trap 'psr_lock_release "$REVIEW_LOCK_ROOT" 2>/dev/null || true; rm -rf "${REVIEW_TMPDIR:-}"; exit 130' INT TERM HUP
+  psr_lock_acquire "$root" || die "获取写锁失败"
 
-if [[ -n "${PSR_REVIEW_TEST_PAUSE:-}" ]]; then
-  # 仅用于回归测试放大持锁窗口；默认不生效。
-  sleep "$PSR_REVIEW_TEST_PAUSE"
+  if [[ -n "${PSR_REVIEW_TEST_PAUSE:-}" ]]; then
+    # 仅用于回归测试放大持锁窗口；默认不生效。
+    sleep "$PSR_REVIEW_TEST_PAUSE"
+  fi
 fi
 
 

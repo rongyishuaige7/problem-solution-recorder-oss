@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.14] - 2026-10-23
+
+### Fixed
+
+- `review --dry-run` no longer takes the write lock, so a read-only knowledge base
+  (directory mode 0555) can still be previewed; writing paths keep the lock-before-read
+  ordering.
+- `web-check` accepts truncation only when the page field is a genuine 280-character
+  excerpt ending in the ellipsis. A 280-character field without the ellipsis is compared
+  word for word, and the token comparison no longer stops after 40 words — the cap made
+  any long prefix look equal and hid extra words inserted after it.
+
+
 ## [0.8.13] - 2026-10-23
 
 ### Fixed
@@ -509,7 +522,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `agents/*.yaml` metadata for multiple runtimes.
 - GitHub Actions workflow for validation and smoke tests.
 
-[Unreleased]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.13...HEAD
+[Unreleased]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.14...HEAD
+[0.8.14]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.13...v0.8.14
 [0.8.13]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.12...v0.8.13
 [0.8.12]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.11...v0.8.12
 [0.8.11]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.10...v0.8.11

@@ -96,7 +96,7 @@ const splitTags = (value) =>
 
 // 词序列比较：两端从同一章节生成，用清理后的前 40 个词核对，
 // 能在不改生成器的情况下发现“同字段、不同文本”的漂移。
-const normalizeTokens = (value, limit = 40) =>
+const normalizeTokens = (value) =>
   String(value || "")
     .toLowerCase()
     // 标题记号、表格竖线、列表符号是格式噪声：两端可能保留或去掉，不应算文本漂移。
@@ -105,8 +105,7 @@ const normalizeTokens = (value, limit = 40) =>
     // 摘要截断会在末尾加省略号；它不属于正文，去掉后再比较。
     .map((token) => token.replace(/…+$/g, "").replace(/^[-:]+|[-:]+$/g, ""))
     .filter(Boolean)
-    .filter((token) => !/^[-:]+$/.test(token))
-    .slice(0, limit);
+    .filter((token) => !/^[-:]+$/.test(token));
 
 // 解析器给全量章节；页面字段是 280 字摘要。未截断时词序列必须完全一致，
 // 截断时才允许页面是解析器的前缀（且末尾半个词不算漂移）。
@@ -158,7 +157,10 @@ for (const record of data.records) {
     const refTokens = normalizeTokens(ref[refKey]);
     const pageText = String(record[pageKey] || "");
     const pageTokens = normalizeTokens(pageText);
-    const at = tokenDrift(refTokens, pageTokens, pageText.length >= 280);
+    // 只有生成器真正截断（280 字且带省略号）才允许是前缀；
+    // 恰好 280 字但没有省略号是内容不同，必须逐词一致。
+    const pageTruncated = pageText.endsWith("…") && pageText.length >= 280;
+    const at = tokenDrift(refTokens, pageTokens, pageTruncated);
     if (at >= 0) {
       const pageWord = at < pageTokens.length ? pageTokens[at] : "（缺失）";
       const refWord = at < refTokens.length ? refTokens[at] : "（缺失）";
