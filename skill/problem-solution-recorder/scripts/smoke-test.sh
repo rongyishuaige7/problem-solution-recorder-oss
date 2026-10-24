@@ -1321,4 +1321,37 @@ run_long "truncated-with-ellipsis" "$long_trunc" 0
 run_long "extra-word-after-prefix" "$long_extra" 1
 pass "280 字无省略号按内容比较，真实截断才放过"
 
+
+# ---------------------------------------------------------------- v0.8.15 回归
+# 280 字截断前缀后出现额外词：必须报漂移，不能因“比较到较短一侧”放行
+kb_cjk="$tmp/kb-webcheck-cjk"
+"$PSR" init "$kb_cjk" >/dev/null
+mkdir -p "$kb_cjk/web" "$kb_cjk/records/2026" "$kb_cjk/bin/lib"
+cp "$SCRIPT_DIR/lib/record-fields.awk" "$kb_cjk/bin/lib/record-fields.awk"
+cp "$SCRIPT_DIR/web-check" "$kb_cjk/bin/web-check"; chmod +x "$kb_cjk/bin/web-check"
+root400="$(printf '根%.0s' $(seq 1 400))"
+printf -- '---\nid: 2026-10-21-001\ntitle: "长中文"\ndate: 2026-10-21\nstatus: solved\n---\n\n# 长中文\n\n## 根因分析\n\n%s\n' "$root400" > "$kb_cjk/records/2026/2026-10-21-001-cjk.md"
+cat > "$kb_cjk/web/generate-data.js" <<'JSEOF'
+const fs = require("fs");
+if (process.argv.includes("--check")) process.exit(0);
+const record = {id:"2026-10-21-001",date:"2026-10-21",status:"solved",tags:[],tools:[],
+  root_cause: process.env.ROOT_TEXT, final_fix:"", verification:"", lesson:"", search_text:""};
+fs.writeFileSync(__dirname+"/data.js","window.KB_DATA = "+JSON.stringify({records:[record]})+";\n");
+JSEOF
+cjk_bad="$(printf '根%.0s' $(seq 1 277)) 假…"
+cjk_good="$(printf '根%.0s' $(seq 1 279))…"
+run_cjk() {
+  local name="$1" text="$2" want="$3" rc
+  ROOT_TEXT="$text" node "$kb_cjk/web/generate-data.js"
+  set +e
+  "$kb_cjk/bin/web-check" > "$tmp/cjk.out" 2>&1
+  rc=$?
+  set -e
+  [[ "$rc" -eq "$want" ]] || fail "web-check $name: rc=$rc (expected $want): $(tail -1 "$tmp/cjk.out")"
+}
+run_cjk "full" "$root400" 0
+run_cjk "277-roots-plus-extra-word" "$cjk_bad" 1
+run_cjk "279-roots-truncated" "$cjk_good" 0
+pass "截断前缀后的额外词会被拒绝，半词豁免只限最后一个词"
+
 printf '[ok] smoke test passed\n'

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.15] - 2026-10-24
+
+### Fixed
+
+- The truncated-page comparison no longer stops at the shorter side. A page excerpt
+  may be at most one token shorter than the parser text, and only its **last** token may
+  be a half word; any extra token after the truncated prefix is reported as drift. This
+  closes the case of 277 `根` plus `假…` (280 characters) being accepted against a
+  400-character section.
+
+
 ## [0.8.14] - 2026-10-23
 
 ### Fixed
@@ -522,7 +533,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `agents/*.yaml` metadata for multiple runtimes.
 - GitHub Actions workflow for validation and smoke tests.
 
-[Unreleased]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.14...HEAD
+[Unreleased]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.15...HEAD
+[0.8.15]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.14...v0.8.15
 [0.8.14]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.13...v0.8.14
 [0.8.13]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.12...v0.8.13
 [0.8.12]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.11...v0.8.12

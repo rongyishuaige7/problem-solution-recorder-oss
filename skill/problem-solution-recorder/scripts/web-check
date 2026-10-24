@@ -107,20 +107,27 @@ const normalizeTokens = (value) =>
     .filter(Boolean)
     .filter((token) => !/^[-:]+$/.test(token));
 
-// 解析器给全量章节；页面字段是 280 字摘要。未截断时词序列必须完全一致，
-// 截断时才允许页面是解析器的前缀（且末尾半个词不算漂移）。
+// 解析器给全量章节；页面字段是 280 字摘要。
+// 未截断：词序列必须完全一致（长度不同即漂移）。
+// 截断：页面最多比解析器少一个词，且只有最后一个词允许是“半词”（解析器词的前缀）；
+//       页面多出任何词都算漂移，不能因为比较到较短一侧就放行。
 const tokenDrift = (left, right, rightTruncated) => {
-  const n = Math.min(left.length, right.length);
-  for (let i = 0; i < n; i += 1) {
-    if (left[i] === right[i]) continue;
-    // 只有最后一个词确实是“被截断的前缀”才放过，不能掩盖完全不同的文本。
-    if (i === n - 1 && rightTruncated && left[i].startsWith(right[i])) return -1;
-    return i;
+  if (!rightTruncated) {
+    const n = Math.min(left.length, right.length);
+    for (let i = 0; i < n; i += 1) {
+      if (left[i] !== right[i]) return i;
+    }
+    return left.length === right.length ? -1 : n;
   }
-  if (left.length === right.length) return -1;
-  if (rightTruncated && left.length > right.length) return -1;
-  // 未截断却长度不同：页面漏了内容（或凭空多了内容）。
-  return n;
+
+  if (right.length > left.length) return left.length;
+
+  const last = right.length - 1;
+  for (let i = 0; i < last; i += 1) {
+    if (left[i] !== right[i]) return i;
+  }
+  if (last >= 0 && !left[last].startsWith(right[last])) return last;
+  return -1;
 };
 
 for (const record of data.records) {
