@@ -1165,4 +1165,56 @@ set -e
 PROBLEM_SOLUTION_KB_ROOT="$kb_table_mix" "$PSR" search "设计文档" >/dev/null 2>&1 || fail "CLI could not find table link text"
 pass "表格混合格式：链接只留文本、粗体去标记、代码保留管道符"
 
+
+# ---------------------------------------------------------------- v0.8.11 回归
+# web-check 不只看字段有无，还能发现“同字段、不同文本”
+if command -v node >/dev/null 2>&1; then
+  kb_web="$tmp/kb-webcheck"
+  "$PSR" init "$kb_web" >/dev/null
+  mkdir -p "$kb_web/web" "$kb_web/records/2026" "$kb_web/bin/lib"
+  cp "$SCRIPT_DIR/lib/record-fields.awk" "$kb_web/bin/lib/record-fields.awk"
+  cp "$SCRIPT_DIR/web-check" "$kb_web/bin/web-check"
+  chmod +x "$kb_web/bin/web-check"
+  printf -- '---\nid: 2026-10-21-001\ntitle: "链接漂移"\ndate: 2026-10-21\nstatus: solved\n---\n\n# 链接漂移\n\n## 根因分析\n\n配置见 [设计文档](https://example.com/URLDRIFT)。\n' > "$kb_web/records/2026/2026-10-21-001-link.md"
+  write_stub() {
+    cat > "$kb_web/web/generate-data.js" <<'JSEOF'
+const fs = require("path") && require("fs");
+if (process.argv.includes("--check")) process.exit(0);
+const root = process.env.WEBCHECK_ROOT_TEXT;
+const data = {
+  records: [
+    {
+      id: "2026-10-21-001",
+      date: "2026-10-21",
+      status: "solved",
+      tags: [],
+      tools: [],
+      root_cause: root,
+      final_fix: "",
+      verification: "",
+      lesson: "",
+      search_text: root.toLowerCase()
+    }
+  ]
+};
+fs.writeFileSync(__dirname + "/data.js", "window.KB_DATA = " + JSON.stringify(data) + ";\n");
+JSEOF
+  }
+  write_stub
+  WEBCHECK_ROOT_TEXT="配置见 设计文档。" node "$kb_web/web/generate-data.js"
+  if ! WEBCHECK_ROOT_TEXT="配置见 设计文档。" "$kb_web/bin/web-check" > "$tmp/webcheck-ok.out" 2>&1; then
+    fail "web-check rejected an aligned field text: $(tail -2 "$tmp/webcheck-ok.out")"
+  fi
+  WEBCHECK_ROOT_TEXT="配置见 [设计文档](https://example.com/URLDRIFT)。" node "$kb_web/web/generate-data.js"
+  set +e
+  WEBCHECK_ROOT_TEXT="配置见 [设计文档](https://example.com/URLDRIFT)。" "$kb_web/bin/web-check" > "$tmp/webcheck-bad.out" 2>&1
+  webcheck_bad_rc=$?
+  set -e
+  [[ "$webcheck_bad_rc" -eq 1 ]] || fail "web-check missed a same-field text drift (rc=$webcheck_bad_rc)"
+  grep -Fq "文本从第" "$tmp/webcheck-bad.out" || fail "web-check did not describe the text drift"
+  pass "web-check 发现同字段文本漂移"
+else
+  printf '[skip] web-check 文本指纹（未安装 node）\n'
+fi
+
 printf '[ok] smoke test passed\n'

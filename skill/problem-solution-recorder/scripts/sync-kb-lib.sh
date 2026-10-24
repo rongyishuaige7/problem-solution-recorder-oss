@@ -19,6 +19,9 @@ Writes:
   <kb>/bin/lib/index.sh
   <kb>/bin/lib/secrets.sh
   <kb>/bin/lib/enumerate.sh
+  <kb>/bin/update-ai-summary-index.sh
+  <kb>/bin/resolve-kb-root.sh
+  <kb>/bin/web-check
 
 The `psr` CLI stays in the skill (install it with `install.sh --bin`); a knowledge
 base keeps `bin/qs` for standalone use.
@@ -75,7 +78,7 @@ for file in record-fields.awk lock.sh ids.sh index.sh secrets.sh enumerate.sh; d
 done
 
 # 共享脚本：知识库内的 qs 与 skill 生成同一种摘要格式。
-for script in update-ai-summary-index.sh resolve-kb-root.sh; do
+for script in update-ai-summary-index.sh resolve-kb-root.sh web-check; do
   src="$SKILL_DIR/scripts/$script"
   dst="$root/bin/$script"
   if [[ "$check_only" -eq 1 ]]; then

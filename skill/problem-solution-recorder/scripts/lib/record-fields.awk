@@ -128,6 +128,8 @@ function strip_line(s,   n, i, p, t, code) {
     s = substr(s, 1, RSTART - 1) "\001" n "\001" substr(s, RSTART + RLENGTH)
   }
 
+  # 与 Web 的 cleanMarkdown 同序：先标题记号，再列表序号，最后复选框。
+  gsub(/^[[:space:]]*#+[[:space:]]*/, "", s)
   gsub(/^[[:space:]]*([-*]+|[0-9]+\.)[[:space:]]+/, "", s)
   gsub(/^[[:space:]]+/, "", s)
   gsub(/[[:space:]]+$/, "", s)

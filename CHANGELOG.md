@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.11] - 2026-10-23
+
+### Added
+
+- `bin/web-check` now compares the text of `root_cause`, `final_fix`, `verification` and
+  `lesson`, not just whether each field has content. It normalises formatting noise
+  (heading markers, table pipes, list bullets) and compares the first 40 tokens, so a
+  same-field divergence such as a link target kept by the page but dropped by the parser
+  fails the gate with the record id and the first differing word. The script is vendored
+  by `sync-kb-lib.sh`, so every knowledge base gets the same check.
+
+### Fixed
+
+- Section text in summaries and search now strips heading markers and list numbers
+  (`###`, `1.`) the same way the dashboard does, so both sides derive the same words from
+  a section. Checkbox state (`[ ]` / `[x]`) is deliberately preserved because `review`
+  reads it.
+
+
 ## [0.8.10] - 2026-10-23
 
 ### Fixed
@@ -454,7 +473,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `agents/*.yaml` metadata for multiple runtimes.
 - GitHub Actions workflow for validation and smoke tests.
 
-[Unreleased]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.10...HEAD
+[Unreleased]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.11...HEAD
+[0.8.11]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.10...v0.8.11
 [0.8.10]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.9...v0.8.10
 [0.8.9]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.8...v0.8.9
 [0.8.8]: https://github.com/rongyishuaige7/problem-solution-recorder-oss/compare/v0.8.7...v0.8.8

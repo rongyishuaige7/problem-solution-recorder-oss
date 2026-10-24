@@ -1,0 +1,179 @@
+#!/usr/bin/env bash
+# Keep web/data.js aligned with the canonical record parser.
+#
+# Usage: web-check [--kb /path/to/kb]
+# Exit: 0 aligned, 1 drift, 2 cannot run.
+set -euo pipefail
+
+ROOT=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --kb) ROOT="${2:-}"; shift 2 ;;
+    -h|--help)
+      sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//'
+      exit 0
+      ;;
+    *) printf 'web-check: unexpected argument: %s\n' "$1" >&2; exit 2 ;;
+  esac
+done
+
+if [[ -z "$ROOT" ]]; then
+  ROOT="$( ( unset CDPATH; cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")/.." >/dev/null 2>&1 && pwd -P ) )"
+fi
+
+LIB="$ROOT/bin/lib/record-fields.awk"
+DATA="$ROOT/web/data.js"
+GEN="$ROOT/web/generate-data.js"
+
+die() {
+  printf 'web-check: %s\n' "$*" >&2
+  exit 2
+}
+
+[[ -f "$LIB" ]] || die "缺少解析器: $LIB（先运行 sync-kb-lib.sh）"
+[[ -f "$GEN" ]] || die "缺少生成器: $GEN"
+command -v node >/dev/null 2>&1 || die "未安装 node"
+
+tmp="$(mktemp -d "${TMPDIR:-/tmp}/web-check.XXXXXX")"
+trap 'rm -rf "$tmp"' EXIT
+
+node "$GEN" --check || die "web/data.js 已过期，先运行 node web/generate-data.js"
+
+files=()
+while IFS= read -r f; do
+  files+=("$f")
+done < <(find "$ROOT/records" -type f -name '*.md' | sort)
+
+if [[ ${#files[@]} -eq 0 ]]; then
+  printf 'web-check: 没有记录\n'
+  exit 0
+fi
+
+# 与页面数据独立：canonical 解析器给出 id/date/status/tags 与正文字段。
+LC_ALL=C awk -v root="$ROOT" -v maxlines=20 -f "$LIB" "${files[@]}" 2>/dev/null |
+  LC_ALL=C awk -F'\t' '
+    function flush() {
+      if (rel == "") return
+      id = v["id"]
+      if (id == "") {
+        base = rel; sub(/.*\//, "", base); sub(/\.md$/, "", base)
+        id = substr(base, 1, 14)
+      }
+      printf "%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\n", \
+        id, v["date"], v["status"], v["tags"], v["root"], v["fix"], v["verify"], v["reuse"]
+    }
+    $1 == "@R" { flush(); rel = $2; delete v; next }
+    $1 == "@F" { v[$2] = $3; next }
+    END { flush() }
+  ' | sort > "$tmp/canonical.txt"
+
+node - "$DATA" "$tmp/canonical.txt" <<'JS'
+const fs = require("fs");
+const [dataFile, canonicalFile] = process.argv.slice(2);
+
+const source = fs.readFileSync(dataFile, "utf8");
+const data = JSON.parse(source.slice(source.indexOf("=") + 1).trim().replace(/;$/, ""));
+
+const canonical = new Map();
+for (const line of fs.readFileSync(canonicalFile, "utf8").split("\n")) {
+  if (!line) continue;
+  const [id, date, status, tags, root, fix, verify, reuse] = line.split("\x1f");
+  canonical.set(id, { date, status, tags, root, fix, verify, reuse });
+}
+
+const problems = [];
+const splitTags = (value) =>
+  String(value || "")
+    .split(/,\s*/)
+    .map((tag) => tag.trim())
+    .filter(Boolean)
+    .sort();
+
+// 词序列比较：两端从同一章节生成，用清理后的前 40 个词核对，
+// 能在不改生成器的情况下发现“同字段、不同文本”的漂移。
+const normalizeTokens = (value, limit = 40) =>
+  String(value || "")
+    .toLowerCase()
+    // 标题记号、表格竖线、列表符号是格式噪声：两端可能保留或去掉，不应算文本漂移。
+    .replace(/[;；,，。.、|#]+/g, " ")
+    .split(/\s+/)
+    .map((token) => token.replace(/^[-:]+|[-:]+$/g, ""))
+    .filter(Boolean)
+    .filter((token) => !/^[-:]+$/.test(token))
+    .slice(0, limit);
+
+// 页面字段是 280 字摘要，只有确实发生截断时，末尾的半个词才不算漂移。
+const tokenDrift = (left, right, rightTruncated) => {
+  const n = Math.min(left.length, right.length);
+  for (let i = 0; i < n; i += 1) {
+    if (left[i] === right[i]) continue;
+    if (i === n - 1 && rightTruncated) return -1;
+    return i;
+  }
+  return -1;
+};
+
+for (const record of data.records) {
+  const ref = canonical.get(record.id);
+  if (!ref) {
+    problems.push(`${record.id}: 页面有记录，解析器没有`);
+    continue;
+  }
+  if (ref.date && record.date !== ref.date) {
+    problems.push(`${record.id}: date 页面=${record.date} 解析器=${ref.date}`);
+  }
+  if (ref.status && record.status !== ref.status) {
+    problems.push(`${record.id}: status 页面=${record.status} 解析器=${ref.status}`);
+  }
+  const pageTags = [...new Set(record.tags)].sort();
+  const refTags = splitTags(ref.tags);
+  if (pageTags.join(",") !== refTags.join(",")) {
+    problems.push(`${record.id}: tags 页面=[${pageTags}] 解析器=[${refTags}]`);
+  }
+
+  for (const [refKey, pageKey] of [
+    ["root", "root_cause"],
+    ["fix", "final_fix"],
+    ["verify", "verification"],
+    ["reuse", "lesson"]
+  ]) {
+    const refHas = String(ref[refKey] || "").trim() !== "";
+    const pageHas = String(record[pageKey] || "").trim() !== "";
+    if (refHas !== pageHas) {
+      problems.push(`${record.id}: ${pageKey} 页面${pageHas ? "有" : "无"}内容，解析器${refHas ? "有" : "无"}内容`);
+      continue;
+    }
+    if (!refHas) continue;
+    const refTokens = normalizeTokens(ref[refKey]);
+    const pageText = String(record[pageKey] || "");
+    const pageTokens = normalizeTokens(pageText);
+    const at = tokenDrift(refTokens, pageTokens, pageText.length >= 280);
+    if (at >= 0) {
+      problems.push(
+        `${record.id}: ${pageKey} 文本从第 ${at + 1} 个词起不一致（页面="${pageTokens[at]}" 解析器="${refTokens[at]}"）`
+      );
+    }
+  }
+}
+
+for (const id of canonical.keys()) {
+  if (!data.records.some((record) => record.id === id)) {
+    problems.push(`${id}: 解析器有记录，页面没有`);
+  }
+}
+
+const dirty = data.records.filter(
+  (record) =>
+    record.tools.some((tool) => /[[\]"']/.test(tool)) ||
+    record.tags.some((tag) => /[[\]"']/.test(tag))
+);
+
+if (problems.length || dirty.length) {
+  for (const line of problems.slice(0, 40)) console.error(`  - ${line}`);
+  if (dirty.length) console.error(`  - ${dirty.length} 条记录的工具/标签含方括号或引号`);
+  console.error(`web-check: ${problems.length + dirty.length} 处不一致`);
+  process.exit(1);
+}
+
+console.log(`web-check: ${data.records.length} 条记录与解析器一致（含正文字段文本）`);
+JS
