@@ -6,6 +6,11 @@
 [![Skill version](https://img.shields.io/badge/skill-0.8.15-blue)](./skill/problem-solution-recorder/SKILL.md)
 
 [![English README](https://img.shields.io/badge/docs-English-0f62fe)](README.md)
+
+![问题-解决知识库看板](./docs/media/dashboard.png)
+
+<sub>看板由虚构的演示知识库渲染（7 条记录、3 个方法），不含真实排障数据。</sub>
+
 中文说明
 
 面向 AI 编程助手的 **Agent Skill**：在 skill 之外维护一套可配置的 **问题–解决 Markdown 知识库**，用于归档已解决问题、保留排障证据、维护人类索引与 AI 摘要索引、检索历史案例、沉淀可复用排障模式，以及做周期性复盘。

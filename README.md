@@ -6,6 +6,10 @@
 [![Skill version](https://img.shields.io/badge/skill-0.8.15-blue)](./skill/problem-solution-recorder/SKILL.md)
 ![Platforms](https://img.shields.io/static/v1?label=platforms&message=Codex%20%7C%20Claude%20%7C%20Cursor%20%7C%20Agents%20%7C%20OpenClaw&color=lightgrey)
 
+![Problem Solution Recorder dashboard](./docs/media/dashboard.png)
+
+<sub>Dashboard rendered from a fictional demo knowledge base (7 records, 3 patterns).</sub>
+
 <details>
 <summary><strong>中文说明（点击展开，无需跳转）</strong></summary>
 
